@@ -1,14 +1,12 @@
 /* ============================================================
-   QParent —— 家长端逻辑
-   - 验证码注册（复用 /api/send-code + /api/parent/register）
-   - 登录（/api/parent/login）
-   - 绑定学生（/api/bind/accept）
-   - 查看学生报告（/api/parent/report/:email）
+   QParent —— 家长端逻辑 (含直接测评版)
    ============================================================ */
 (function(){
   'use strict';
 
+  const Q = window.QBTI;
   const SESSION_KEY = 'qparent_session_v1';
+  const ADHOC_KEY = 'qparent_adhoc_reports';
   const SESSION_DURATION = 30 * 24 * 60 * 60 * 1000;
   const CODE_COOLDOWN = 60 * 1000;
   const API_BASE = '';
@@ -19,6 +17,18 @@
 
   let currentParent = null;
   let codeTimer = null;
+
+  // 答题状态
+  const qState = {
+    idx: 0,
+    answers: {},
+    timings: {},
+    questionShownAt: {},
+    locked: false,
+    result: null,
+    validity: null,
+    aiReportText: null
+  };
 
   function escapeHTML(s){
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -61,7 +71,18 @@
     currentParent = null;
   }
 
-  /* ---------- Auth Modal ---------- */
+  /* ---------- Adhoc Reports Storage ---------- */
+  function getAdhocReports(){
+    try { return JSON.parse(localStorage.getItem(ADHOC_KEY) || '[]'); } catch(e){ return []; }
+  }
+  function saveAdhocReport(report){
+    const list = getAdhocReports();
+    list.unshift(report);
+    if(list.length > 10) list.length = 10;
+    localStorage.setItem(ADHOC_KEY, JSON.stringify(list));
+  }
+
+  /* ---------- Auth Modal (与原版一致) ---------- */
   function buildAuthModal(){
     const mask = document.createElement('div');
     mask.className = 'auth-mask';
@@ -290,11 +311,8 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: data.email,
-          phone: data.phone,
-          code: data.code,
-          username: data.username,
-          password: data.password
+          email: data.email, phone: data.phone, code: data.code,
+          username: data.username, password: data.password
         })
       });
       const r = await res.json();
@@ -353,7 +371,7 @@
     }
   }
 
-  /* ---------- 首页 / 学生列表 ---------- */
+  /* ---------- 首页渲染 ---------- */
   function renderHome(){
     if(!currentParent){
       navTag.textContent = '未登录';
@@ -361,7 +379,7 @@
       return;
     }
     navTag.textContent = currentParent.username;
-    renderStudentList();
+    renderDashboard();
   }
 
   function renderGate(){
@@ -377,8 +395,7 @@
     $('btnShowRegister').addEventListener('click', () => openAuth('register'));
   }
 
-  async function renderStudentList(){
-    navTag.textContent = currentParent.username;
+  async function renderDashboard(){
     app.innerHTML = `
       <div class="topbar">
         <div class="user-chip">
@@ -388,64 +405,99 @@
         <button class="logout-btn" id="btnLogout">退出登录</button>
       </div>
 
+      <!-- 孩子列表区域 -->
       <div class="topbar" style="margin-bottom:24px;">
         <div style="font-size:13px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;">已绑定的孩子</div>
         <button class="add-student-btn" id="btnAddStudent">+ 绑定孩子</button>
       </div>
-
       <div class="student-list" id="studentList">
         <div class="empty-state">正在加载…</div>
       </div>
-    `;
-    $('btnLogout').addEventListener('click', () => {
-      clearSession();
-      renderHome();
-    });
-    $('btnAddStudent').addEventListener('click', openBindDialog);
 
+      <!-- 直接测评区域 -->
+      <div class="topbar" style="margin-top:40px;margin-bottom:24px;">
+        <div style="font-size:13px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;">直接测评（无需绑定）</div>
+        <button class="add-adhoc-btn" id="btnStartAdhoc">+ 开始新测评</button>
+      </div>
+      <div class="student-list" id="adhocList"></div>
+    `;
+    
+    $('btnLogout').addEventListener('click', () => { clearSession(); renderHome(); });
+    $('btnAddStudent').addEventListener('click', openBindDialog);
+    $('btnStartAdhoc').addEventListener('click', startQuiz);
+
+    loadBoundStudents();
+    loadAdhocReports();
+  }
+
+  async function loadBoundStudents(){
     try {
       const res = await fetch(API_BASE + '/api/parent/students?email=' + encodeURIComponent(currentParent.email));
       const data = await res.json();
       if(!res.ok || !data.success) throw new Error(data.error || '加载失败');
-      renderStudents(data.list || []);
+      
+      const el = $('studentList');
+      const list = data.list || [];
+      if(list.length === 0){
+        el.innerHTML = '<div class="empty-state">还没有绑定任何孩子。请点击右上角「+ 绑定孩子」。</div>';
+        return;
+      }
+      el.innerHTML = list.map(s => {
+        const name = s.studentUsername || s.studentEmail;
+        const init = name.slice(0,1).toUpperCase();
+        const badge = s.hasReport ? '<span class="sc-badge">有报告</span>' : '<span class="sc-badge empty">暂无报告</span>';
+        const meta = s.hasReport ? ('最近更新：' + formatTime(s.reportUpdatedAt)) : ('绑定于 ' + formatTime(s.boundAt));
+        return `<div class="student-card" data-type="sync" data-email="${escapeHTML(s.studentEmail)}">
+          <div class="sc-head">
+            <div class="sc-avatar">${escapeHTML(init)}</div>
+            <div class="sc-info">
+              <div class="sc-name">${escapeHTML(name)}</div>
+              <div class="sc-meta">${escapeHTML(meta)}</div>
+            </div>
+            ${badge}
+          </div>
+        </div>`;
+      }).join('');
+      el.querySelectorAll('.student-card').forEach(card => {
+        card.addEventListener('click', () => showSyncedReport(card.dataset.email));
+      });
     } catch(err){
       $('studentList').innerHTML = '<div class="empty-state" style="color:#FF8FA0;">加载失败：' + escapeHTML(err.message) + '</div>';
     }
   }
 
-  function renderStudents(list){
-    const el = $('studentList');
-    if(!el) return;
+  function loadAdhocReports(){
+    const el = $('adhocList');
+    const list = getAdhocReports();
     if(list.length === 0){
-      el.innerHTML = '<div class="empty-state">还没有绑定任何孩子。<br>请点击右上角「+ 绑定孩子」，输入孩子提供的邀请码。</div>';
+      el.innerHTML = '<div class="empty-state" style="padding:30px 20px;font-size:13px;">暂无记录，点击上方「开始新测评」为孩子生成报告。</div>';
       return;
     }
-    el.innerHTML = list.map(s => {
-      const name = s.studentUsername || s.studentEmail;
-      const init = (s.studentUsername || s.studentEmail || '?').slice(0,1).toUpperCase();
-      const badge = s.hasReport
-        ? '<span class="sc-badge">有报告</span>'
-        : '<span class="sc-badge empty">暂无报告</span>';
-      const meta = s.hasReport
-        ? ('最近更新：' + formatTime(s.reportUpdatedAt))
-        : ('绑定于 ' + formatTime(s.boundAt));
-      return '<div class="student-card" data-email="' + escapeHTML(s.studentEmail) + '">'
-        + '<div class="sc-head">'
-        + '<div class="sc-avatar">' + escapeHTML(init) + '</div>'
-        + '<div class="sc-info">'
-        +   '<div class="sc-name">' + escapeHTML(name) + '</div>'
-        +   '<div class="sc-meta">' + escapeHTML(meta) + '</div>'
-        + '</div>'
-        + badge
-        + '</div></div>';
+    el.innerHTML = list.map(r => {
+      const badge = '<span class="sc-badge" style="background:rgba(255,138,72,.14);color:#FF8A48;border-color:rgba(255,138,72,.3);">未绑定</span>';
+      const typeName = Q.TYPE_NAMES[r.result.letters.join('')] || '';
+      return `<div class="student-card" data-type="adhoc" data-id="${r.id}">
+        <div class="sc-head">
+          <div class="sc-avatar" style="background:#FF8A48;">测</div>
+          <div class="sc-info">
+            <div class="sc-name">${escapeHTML(r.result.letters.join(''))}-${r.result.suffix.letter} · ${escapeHTML(typeName)}</div>
+            <div class="sc-meta">测试时间：${formatTime(r.timestamp)}</div>
+          </div>
+          ${badge}
+        </div>
+      </div>`;
     }).join('');
-
+    
     el.querySelectorAll('.student-card').forEach(card => {
-      card.addEventListener('click', () => showReport(card.dataset.email));
+      card.addEventListener('click', () => {
+        const id = card.dataset.id;
+        const report = getAdhocReports().find(r => r.id === id);
+        if(report) renderReportView(report.result, report.validity, report.aiReportText);
+      });
     });
   }
 
-  /* ---------- 绑定孩子 ---------- */
+  /* ---------- 绑定孩子弹窗 ---------- */
   function openBindDialog(){
     const old = document.getElementById('bindMask');
     if(old) old.remove();
@@ -498,7 +550,7 @@
         }
         mask.remove();
         toast('绑定成功：' + (r.studentUsername || r.studentEmail), 'ok');
-        renderStudentList();
+        renderDashboard();
       } catch(e){
         err.textContent = '无法连接服务器';
         btn.disabled = false;
@@ -507,33 +559,146 @@
     }
   }
 
-  /* ---------- 报告展示 ---------- */
-  async function showReport(studentEmail){
-    app.innerHTML = '<div class="empty-state">正在加载报告…</div>';
-    try {
-      const res = await fetch(API_BASE + '/api/parent/report/' + encodeURIComponent(studentEmail) +
-        '?parentEmail=' + encodeURIComponent(currentParent.email));
-      const data = await res.json();
-      if(!res.ok || !data.success){
-        renderReportError(data.error || '加载失败', studentEmail);
-        return;
-      }
-      renderReport(data.report);
-    } catch(err){
-      renderReportError('无法连接服务器', studentEmail);
+  /* ============================================================
+     家长直接答题逻辑
+     ============================================================ */
+  function startQuiz(){
+    qState.idx = 0;
+    qState.answers = {};
+    qState.timings = {};
+    qState.questionShownAt = {};
+    qState.locked = false;
+    qState.result = null;
+    qState.validity = null;
+    qState.aiReportText = null;
+    
+    renderQuiz();
+  }
+
+  function renderGroupStrip(){
+    const cur = Q.QUESTIONS[qState.idx].group;
+    const labels = ['潜能开放度','内在驱动力','学习自主性','未知应对方式'];
+    return [1,2,3,4].map(g => {
+      let cls = 'group-dot';
+      if(g < cur) cls += ' done'; else if(g === cur) cls += ' active';
+      return `<span class="${cls}"><span class="gd-num">0${g}</span> ${labels[g-1]}</span>`;
+    }).join('');
+  }
+
+  function renderQuiz(){
+    const q = Q.QUESTIONS[qState.idx];
+    if(!qState.questionShownAt[q.id]) qState.questionShownAt[q.id] = Date.now();
+    
+    app.innerHTML = `
+      <button class="back-btn" id="btnQuitQuiz">← 放弃并返回</button>
+      <div class="screen active">
+        <div class="quiz-head">
+          <div class="progress-track"><div class="progress-fill" id="progFill" style="width:${(qState.idx / Q.QUESTIONS.length * 100)}%"></div></div>
+          <div class="progress-text"><b>${qState.idx + 1}</b> / ${Q.QUESTIONS.length}</div>
+        </div>
+        <div class="group-strip" id="groupStrip">${renderGroupStrip()}</div>
+        <div class="quiz-card">
+          <h2 class="q-text">${q.text}</h2>
+          <div class="options" id="options">
+            ${Q.OPTIONS.map((o, i) => `
+              <button class="opt" data-v="${o.v}">
+                <span class="num">${i+1}</span><span class="dot"></span><span>${o.t}</span>
+              </button>
+            `).join('')}
+          </div>
+        </div>
+        <div class="quiz-foot">
+          <button class="btn sm" id="btnPrev" ${qState.idx === 0 ? 'disabled' : ''}>← 上一题</button>
+          <span class="hint">键盘 1–5 可快速作答</span>
+        </div>
+      </div>
+    `;
+    
+    $('btnQuitQuiz').addEventListener('click', () => {
+      if(confirm('确定要放弃本次测评吗？')) renderDashboard();
+    });
+    $('btnPrev').addEventListener('click', () => {
+      if(qState.idx > 0 && !qState.locked) { qState.idx--; renderQuiz(); }
+    });
+    
+    const optionsEl = $('options');
+    optionsEl.addEventListener('click', e => {
+      const btn = e.target.closest('.opt');
+      if(btn) answerQuiz(parseInt(btn.dataset.v, 10), optionsEl);
+    });
+
+    const chosen = qState.answers[q.id];
+    if(chosen != null){
+      const el = optionsEl.querySelector(`[data-v="${chosen}"]`);
+      if(el) el.classList.add('selected');
     }
   }
 
-  function renderReportError(msg, studentEmail){
-    app.innerHTML = `
-      <button class="back-btn" id="btnBack">← 返回</button>
-      <div class="card" style="text-align:center;padding:40px;">
-        <div style="font-size:15px;color:#FF8FA0;margin-bottom:10px;">加载失败</div>
-        <div style="font-size:13px;color:var(--muted);line-height:1.8;">${escapeHTML(msg)}</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:16px;">孩子需要在学生端完成一次测评并登录，报告才会同步到服务器。</div>
-      </div>
-    `;
-    $('btnBack').addEventListener('click', renderStudentList);
+  function answerQuiz(val, optionsEl){
+    if(qState.locked) return;
+    qState.locked = true;
+    const q = Q.QUESTIONS[qState.idx];
+    qState.answers[q.id] = val;
+    
+    if(qState.timings[q.id] == null && qState.questionShownAt[q.id]){
+      qState.timings[q.id] = Math.max(0.1, (Date.now() - qState.questionShownAt[q.id]) / 1000);
+    }
+    
+    optionsEl.querySelectorAll('.opt').forEach(el => el.classList.remove('selected'));
+    const sel = optionsEl.querySelector(`[data-v="${val}"]`);
+    if(sel) sel.classList.add('selected');
+    
+    setTimeout(() => {
+      qState.locked = false;
+      qState.idx++;
+      if(qState.idx >= Q.QUESTIONS.length) finishQuiz();
+      else renderQuiz();
+    }, 240);
+  }
+
+  // 监听键盘
+  document.addEventListener('keydown', e => {
+    if(!$('options')) return; // 不在答题页
+    const n = parseInt(e.key, 10);
+    if(n >= 1 && n <= 5){ 
+      e.preventDefault(); 
+      const optionsEl = $('options');
+      if(optionsEl) answerQuiz(n, optionsEl);
+    }
+    if(e.key === 'Backspace' && qState.idx > 0 && !qState.locked){
+      e.preventDefault();
+      qState.idx--;
+      renderQuiz();
+    }
+  });
+
+  function finishQuiz(){
+    qState.result = Q.computeResult(qState.answers);
+    qState.validity = Q.analyzeResponseValidity(qState.answers, qState.timings);
+    
+    const reportId = 'adhoc_' + Date.now();
+    saveAdhocReport({
+      id: reportId,
+      timestamp: Date.now(),
+      result: qState.result,
+      validity: qState.validity,
+      aiReportText: null
+    });
+
+    renderReportView(qState.result, qState.validity, null);
+    toast('测评完成！', 'ok');
+  }
+
+  /* ============================================================
+     报告展示通用逻辑 (可复用同步报告和本地报告)
+     ============================================================ */
+  function setAccent(quantumState){
+    const map = { good:[80,220,140], danger:[235,65,75], superposition:[90,140,245] };
+    const c = map[quantumState] || [255,138,72];
+    document.documentElement.style.setProperty('--q-r', c[0]);
+    document.documentElement.style.setProperty('--q-g', c[1]);
+    document.documentElement.style.setProperty('--q-b', c[2]);
+    document.documentElement.style.setProperty('--q-color', 'rgb(' + c.join(',') + ')');
   }
 
   const DIM_COLORS = {
@@ -545,13 +710,31 @@
   const DIM_LETTERS = { PO:['X','C','A'], II:['U','P','M'], LA:['I','D','E'], UR:['T','H','R'] };
   const DIM_NAMES = { PO:'潜能开放度', II:'内在驱动力', LA:'学习自主性', UR:'未知应对方式' };
 
-  function setAccent(quantumState){
-    const map = { good:[80,220,140], danger:[235,65,75], superposition:[90,140,245] };
-    const c = map[quantumState] || [255,138,72];
-    document.documentElement.style.setProperty('--q-r', c[0]);
-    document.documentElement.style.setProperty('--q-g', c[1]);
-    document.documentElement.style.setProperty('--q-b', c[2]);
-    document.documentElement.style.setProperty('--q-color', 'rgb(' + c.join(',') + ')');
+  async function showSyncedReport(studentEmail){
+    app.innerHTML = '<div class="empty-state">正在加载报告…</div>';
+    try {
+      const res = await fetch(API_BASE + '/api/parent/report/' + encodeURIComponent(studentEmail) +
+        '?parentEmail=' + encodeURIComponent(currentParent.email));
+      const data = await res.json();
+      if(!res.ok || !data.success) {
+        renderReportError(data.error || '加载失败');
+        return;
+      }
+      renderReportView(data.report.payload, data.report.payload.validity, data.report.payload.aiReport, data.report.updatedAt);
+    } catch(err){
+      renderReportError('无法连接服务器');
+    }
+  }
+
+  function renderReportError(msg){
+    app.innerHTML = `
+      <button class="back-btn" id="btnBack">← 返回</button>
+      <div class="card" style="text-align:center;padding:40px;">
+        <div style="font-size:15px;color:#FF8FA0;margin-bottom:10px;">加载失败</div>
+        <div style="font-size:13px;color:var(--muted);line-height:1.8;">${escapeHTML(msg)}</div>
+      </div>
+    `;
+    $('btnBack').addEventListener('click', renderDashboard);
   }
 
   function renderMD(text){
@@ -567,54 +750,42 @@
     }).join('');
   }
 
-  function renderReport(rep){
-    const p = rep.payload;
-    setAccent(p.quantumState);
+  function renderReportView(res, validity, aiReportText, updatedAt){
+    const baseCode = res.letters.join('');
+    const typeName = Q.TYPE_NAMES[baseCode] || '';
+    const qs = Q.analyzeQuantumState(res);
+    setAccent(qs.type);
 
-    const v = p.validity;
-    const colorMap = { high:'#50DC8C', medium:'#FFD98A', low:'#FF8A48', very_low:'#EB414B' };
-    const vColor = v ? (colorMap[v.level] || '#8B90B8') : '#8B90B8';
-    const reasons = (v && v.parentReasons && v.parentReasons.length)
-      ? v.parentReasons.map(r => '▸ ' + escapeHTML(r)).join('<br>')
+    const vColorMap = { high:'#50DC8C', medium:'#FFD98A', low:'#FF8A48', very_low:'#EB414B' };
+    const vColor = validity ? (vColorMap[validity.level] || '#8B90B8') : '#8B90B8';
+    const reasons = (validity && validity.parentReasons && validity.parentReasons.length)
+      ? validity.parentReasons.map(r => '▸ ' + escapeHTML(r)).join('<br>')
       : '▸ 未发现明显疑点';
-    const timeLine = (v && v.totalTime != null && v.avgTime != null)
-      ? '作答用时约 ' + Math.round(v.totalTime) + ' 秒 · 平均每题 ' + v.avgTime.toFixed(1) + ' 秒'
-      : '';
+    const timeLine = (validity && validity.totalTime != null)
+      ? '作答用时约 ' + Math.round(validity.totalTime) + ' 秒' : '';
 
-    const dimsHTML = ['PO','II','LA','UR'].map(id => {
-      const ratio = p.dimGroupRatio[id];
-      const info = p.dimLeadInfo[id];
-      if(!ratio || !info) return '';
-      const segs = DIM_LETTERS[id].map(l => {
+    const dimsHTML = Q.DIMS.map(d => {
+      const ratio = res.dimGroupRatio[d.id];
+      const info = res.dimLeadInfo[d.id];
+      const segs = d.letters.map(l => {
         const pct = ratio[l];
-        return '<div class="seg" style="width:' + pct + '%;background:' + DIM_COLORS[id][l] + ';">' + (pct >= 10 ? l : '') + '</div>';
+        return `<div class="seg" style="width:${pct}%;background:${DIM_COLORS[d.id][l]};">${pct >= 10 ? l : ''}</div>`;
       }).join('');
-      return '<div class="dim-row">'
-        + '<div class="dim-name">' + DIM_NAMES[id] + '</div>'
-        + '<div class="dim-bar">' + segs + '</div>'
-        + '<div class="dim-lead">' + info.lead + '</div>'
-        + '</div>';
+      return `<div class="dim-row">
+        <div class="dim-name">${d.name}</div>
+        <div class="dim-bar">${segs}</div>
+        <div class="dim-lead">${info.lead}</div>
+      </div>`;
     }).join('');
 
-    let aiHTML = '';
-    if(p.aiReport){
-      aiHTML = '<div class="title">AI 引导报告</div>'
-        + '<div class="card ai-body">' + renderMD(p.aiReport) + '</div>';
-    } else {
-      aiHTML = '<div class="title">AI 引导报告</div>'
-        + '<div class="card" style="color:#8B90B8;font-size:13.5px;line-height:1.8;">'
-        + '孩子尚未生成 AI 报告。可以请孩子在学生端点击「生成报告」，报告会自动同步到此处。</div>';
-    }
-
-    const studentName = rep.studentUsername || rep.studentEmail;
-
     app.innerHTML = `
-      <button class="back-btn" id="btnBack">← 返回孩子列表</button>
+      <button class="back-btn" id="btnBack">← 返回列表</button>
+      
       <div class="hero">
-        <div class="code">${escapeHTML(p.code)}</div>
-        <div class="name">${escapeHTML(p.typeName || '')} · ${escapeHTML(p.suffixName)}</div>
-        <div class="sub">${escapeHTML(studentName)} 的量子学习类型</div>
-        <div style="font-size:11.5px;color:var(--muted);margin-top:6px;">最近更新：${formatTime(rep.updatedAt)}</div>
+        <div class="code">${baseCode}<span style="font-size:0.7em;color:var(--q-color)">-${res.suffix.letter}</span></div>
+        <div class="name">${escapeHTML(typeName)} · ${escapeHTML(res.suffix.name)}</div>
+        <div class="sub">量子学习类型</div>
+        ${updatedAt ? `<div style="font-size:11.5px;color:var(--muted);margin-top:6px;">最近更新：${formatTime(updatedAt)}</div>` : ''}
       </div>
 
       <div class="title">作答真实度 · 面向家长</div>
@@ -622,42 +793,100 @@
         <div class="authenticity">
           <div>
             <div class="label">Authenticity Score</div>
-            <div class="level" style="color:${vColor};">● ${v ? escapeHTML(v.levelText) : '未评估'}</div>
-            ${timeLine ? '<div style="font-size:12px;color:#8B90B8;margin-top:4px;">' + escapeHTML(timeLine) + '</div>' : ''}
+            <div class="level" style="color:${vColor};">● ${validity ? escapeHTML(validity.levelText) : '未评估'}</div>
+            ${timeLine ? `<div style="font-size:12px;color:#8B90B8;margin-top:4px;">${escapeHTML(timeLine)}</div>` : ''}
           </div>
-          <div class="score" style="color:${vColor};">${v ? v.authenticity : '--'}<small> / 100</small></div>
+          <div class="score" style="color:${vColor};">${validity ? validity.authenticity : '--'}<small> / 100</small></div>
         </div>
         <div class="reason">${reasons}</div>
-        ${v ? '<div class="advice">给家长的建议：' + escapeHTML(v.advice) + '</div>' : ''}
+        ${validity ? `<div class="advice">给家长的建议：${escapeHTML(validity.advice)}</div>` : ''}
       </div>
 
       <div class="title">四维倾向</div>
       <div class="card">${dimsHTML}</div>
 
-      ${aiHTML}
-
-      <div style="text-align:center;font-size:11.5px;color:rgba(255,255,255,.32);margin-top:40px;line-height:1.8;">
-        本报告由 QBTI 自动生成<br>
-        请把它当作一次对话的开始，而不是一次评判。
+      <div class="title">AI 引导报告</div>
+      <div class="card ai-body" id="aiBody">
+        ${aiReportText ? renderMD(aiReportText) : `
+          <div style="text-align:center;padding:20px 0;">
+            <div style="color:var(--muted);font-size:13px;margin-bottom:14px;">尚未生成 AI 报告</div>
+            <button class="btn primary sm" id="btnGenAI">✨ 生成 AI 报告</button>
+          </div>
+        `}
+      </div>
+      
+      <div class="result-actions">
+        <button class="btn" id="btnBackBottom">返回</button>
       </div>
     `;
+    
+    $('btnBack').addEventListener('click', renderDashboard);
+    $('btnBackBottom').addEventListener('click', renderDashboard);
 
-    $('btnBack').addEventListener('click', renderStudentList);
+    if(!aiReportText && $('btnGenAI')){
+      $('btnGenAI').addEventListener('click', async () => {
+        const btn = $('btnGenAI');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span>生成中…';
+        try {
+          // 注意：这里需要您配置 API Key，如果没有配置则走本地保底
+          const prompt = Q.buildPrompt(res, validity);
+          const text = await callDeepSeekAPI(prompt);
+          
+          // 保存到本地
+          const list = getAdhocReports();
+          const currentId = list.find(r => r.result.letters.join('') === baseCode && r.result.suffix.letter === res.suffix.letter)?.id;
+          if(currentId) {
+            const item = list.find(r => r.id === currentId);
+            if(item) { item.aiReportText = text; localStorage.setItem(ADHOC_KEY, JSON.stringify(list)); }
+          }
+          
+          $('aiBody').innerHTML = renderMD(text);
+        } catch(err){
+          // 保底本地报告
+          const fallback = Q.localReport(res, validity);
+          $('aiBody').innerHTML = `<div style="color:#FF9BB5;font-size:12px;margin-bottom:12px;">AI 调用失败：${escapeHTML(err.message)}</div>` + renderMD(fallback);
+        } finally {
+          if(btn) { btn.disabled = false; btn.textContent = '重新生成'; }
+        }
+      });
+    }
+  }
+
+  /* 简单的 DeepSeek API 调用 (复用学生端逻辑，建议配置 Key) */
+  async function callDeepSeekAPI(prompt){
+    const CFG_KEY = 'qbti_config_v2';
+    let cfg = { url: 'https://api.deepseek.com/chat/completions', key: '', model: 'deepseek-chat' };
+    try {
+      const saved = JSON.parse(localStorage.getItem(CFG_KEY) || '{}');
+      if(saved.key) cfg = { ...cfg, ...saved };
+    } catch(e){}
+    
+    if(!cfg.key) throw new Error('家长端未配置 API Key。请前往学生端点 ⚙ 配置一次即可。');
+    
+    const res = await fetch(cfg.url, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.key},
+      body: JSON.stringify({
+        model: cfg.model,
+        messages: [
+          {role: 'system', content: '你是一位教育引导顾问，语气温暖、具体、不评判。面向家长。'},
+          {role: 'user', content: prompt}
+        ],
+        temperature: 0.85,
+        max_tokens: 2400
+      })
+    });
+    if(!res.ok) throw new Error('API 请求失败');
+    const data = await res.json();
+    return data.choices[0].message.content;
   }
 
   /* ---------- 初始化 ---------- */
   function init(){
     const session = loadSession();
-    if(session){
-      currentParent = {
-        email: session.email,
-        phone: session.phone,
-        username: session.username,
-        createdAt: session.createdAt
-      };
-    }
+    if(session) currentParent = { email: session.email, phone: session.phone, username: session.username };
     renderHome();
-    console.log('[QParent] 已初始化，登录状态:', !!currentParent);
   }
 
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
