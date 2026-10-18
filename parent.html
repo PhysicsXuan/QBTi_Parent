@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>QBTI · 家长端</title>
+<!-- 引入扫码库 -->
+<script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
 <style>
 :root{--q-r:255;--q-g:138;--q-b:72;--q-color:rgb(var(--q-r),var(--q-g),var(--q-b));--txt:#E9EBFF;--muted:#8B90B8;}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -114,7 +116,7 @@ body{background:#000;color:var(--txt);font-family:-apple-system,BlinkMacSystemFo
 .back-btn{margin-bottom:20px;display:inline-flex;align-items:center;gap:6px;background:none;border:0;color:var(--muted);font-size:13px;cursor:pointer;font-family:inherit;padding:6px 0;}
 .back-btn:hover{color:#fff;}
 
-/* ---- Quiz & Result 样式 (移植自 index.html) ---- */
+/* ---- Quiz & Result 样式 ---- */
 .screen{display:none;flex:1;}
 .screen.active{display:block;}
 .quiz-head{display:flex;align-items:center;gap:16px;margin-bottom:22px}
@@ -191,6 +193,12 @@ body{background:#000;color:var(--txt);font-family:-apple-system,BlinkMacSystemFo
 .vector-card .vc-fill{height:100%;width:0;border-radius:99px;background:var(--q-color);transition:width .9s;}
 .vector-card .vc-desc{font-size:11.5px;color:#A8AEDA;margin-top:10px;line-height:1.55}
 .result-actions{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:48px}
+
+/* 扫码区域 */
+#reader-container{width:100%;max-width:400px;margin:0 auto 16px;border-radius:12px;overflow:hidden;background:#000;display:none;}
+#reader{width:100%;border:none !important;}
+.scan-btn{width:100%;padding:12px;border-radius:11px;border:1px dashed var(--q-color);background:rgba(var(--q-r),var(--q-g),var(--q-b),.08);color:var(--q-color);font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;margin-bottom:16px;display:flex;align-items:center;justify-content:center;gap:8px;transition:.2s;}
+.scan-btn:hover{background:rgba(var(--q-r),var(--q-g),var(--q-b),.15);}
 </style>
 </head>
 <body>
@@ -205,10 +213,8 @@ body{background:#000;color:var(--txt);font-family:-apple-system,BlinkMacSystemFo
   </div>
 </nav>
 
-<!-- 主容器 -->
 <div class="wrap" id="app"></div>
 
-<!-- 引入 QBTI 核心算法 -->
 <script src="qbti-core.js"></script>
 <script src="parent-auth.js"></script>
 </body>
