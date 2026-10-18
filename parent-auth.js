@@ -17,9 +17,8 @@
 
   let currentParent = null;
   let codeTimer = null;
-  let html5QrcodeScanner = null; // 扫码实例
+  let html5QrcodeScanner = null;
 
-  // 答题状态
   const qState = {
     idx: 0,
     answers: {},
@@ -246,6 +245,17 @@
     btn.textContent = '发送中…';
 
     try {
+      // 检查该邮箱是否已被学生端注册
+      const checkRes = await fetch(API_BASE + '/api/check-email?email=' + encodeURIComponent(data.email) + '&role=parent');
+      const checkData = await checkRes.json();
+      if (!checkData.available) {
+         setFieldError(form, 'email', checkData.msg || '该邮箱已被占用');
+         toast(checkData.msg || '该邮箱已被占用', 'err');
+         btn.disabled = false;
+         btn.textContent = oldText;
+         return;
+      }
+
       const res = await fetch(API_BASE + '/api/send-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -406,7 +416,6 @@
         <button class="logout-btn" id="btnLogout">退出登录</button>
       </div>
 
-      <!-- 孩子列表区域 -->
       <div class="topbar" style="margin-bottom:24px;">
         <div style="font-size:13px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;">已绑定的孩子</div>
         <button class="add-student-btn" id="btnAddStudent">+ 绑定孩子</button>
@@ -415,7 +424,6 @@
         <div class="empty-state">正在加载…</div>
       </div>
 
-      <!-- 直接测评区域 -->
       <div class="topbar" style="margin-top:40px;margin-bottom:24px;">
         <div style="font-size:13px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;">直接测评（无需绑定）</div>
         <button class="add-adhoc-btn" id="btnStartAdhoc">+ 开始新测评</button>
@@ -430,11 +438,9 @@
     loadBoundStudents();
     loadAdhocReports();
 
-    // 检查 URL 参数中是否有邀请码（家长直接扫码跳转过来的情况）
     const urlParams = new URLSearchParams(window.location.search);
     const codeParam = urlParams.get('code');
     if(codeParam) {
-      // 如果当前没有绑定，则自动弹出绑定框
       window.history.replaceState({}, document.title, window.location.pathname);
       setTimeout(() => {
         openBindDialog(codeParam);
@@ -509,12 +515,10 @@
     });
   }
 
-  /* ---------- 绑定孩子弹窗 (含扫码) ---------- */
   function openBindDialog(prefillCode){
     const old = document.getElementById('bindMask');
     if(old) old.remove();
     
-    // 如果之前有打开摄像头，先关闭
     if(html5QrcodeScanner) {
       try { html5QrcodeScanner.clear(); } catch(e){}
       html5QrcodeScanner = null;
@@ -529,12 +533,10 @@
         <div style="font-size:15px;font-weight:700;color:#fff;margin-bottom:8px;">扫描二维码或输入邀请码</div>
         <div style="font-size:12px;color:var(--muted);margin-bottom:20px;line-height:1.7;">请让孩子在学生端生成邀请二维码</div>
         
-        <!-- 扫码按钮 -->
         <button id="btnStartScan" class="scan-btn" style="width:100%;padding:12px;border-radius:11px;border:1px dashed var(--q-color);background:rgba(var(--q-r),var(--q-g),var(--q-b),.08);color:var(--q-color);font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;margin-bottom:16px;display:flex;align-items:center;justify-content:center;gap:8px;transition:.2s;">
           📷 打开摄像头扫码
         </button>
         
-        <!-- 扫码区域 -->
         <div id="reader-container">
           <div id="reader"></div>
           <button id="btnStopScan" style="width:100%;padding:10px;background:transparent;border:none;color:var(--muted);font-size:12px;cursor:pointer;">取消扫码</button>
@@ -561,13 +563,8 @@
       input.focus();
     }
 
-    // 扫码逻辑
-    $('btnStartScan').addEventListener('click', () => {
-      startScan();
-    });
-    $('btnStopScan').addEventListener('click', () => {
-      stopScan();
-    });
+    $('btnStartScan').addEventListener('click', () => { startScan(); });
+    $('btnStopScan').addEventListener('click', () => { stopScan(); });
 
     function startScan() {
       if (!window.Html5Qrcode) {
@@ -579,13 +576,11 @@
       
       html5QrcodeScanner = new Html5Qrcode("reader");
       html5QrcodeScanner.start(
-        { facingMode: "environment" }, // 优先使用后置摄像头
+        { facingMode: "environment" },
         { fps: 10, qrbox: { width: 250, height: 250 } },
         (decodedText) => {
-          // 扫码成功回调
           stopScan();
           let code = decodedText;
-          // 如果是 URL 链接，提取 ?code= 参数
           if (decodedText.includes('code=')) {
             try {
               const url = new URL(decodedText);
@@ -596,16 +591,14 @@
           if(/^[A-Z0-9]{6}$/i.test(code)) {
             input.value = code.toUpperCase();
             toast('识别成功，正在绑定…', 'ok');
-            submit(); // 自动提交
+            submit();
           } else {
             err.textContent = '二维码无效，请确保扫的是邀请码';
             $('btnStartScan').style.display = 'flex';
             $('reader-container').style.display = 'none';
           }
         },
-        (errorMessage) => {
-          // 忽略扫码过程中的频繁报错
-        }
+        (errorMessage) => {}
       ).catch(err => {
         console.error('摄像头启动失败', err);
         err.textContent = '无法启动摄像头。请确保使用 HTTPS 访问，并允许浏览器获取权限';
@@ -763,9 +756,8 @@
     }, 240);
   }
 
-  // 监听键盘
   document.addEventListener('keydown', e => {
-    if(!$('options')) return; // 不在答题页
+    if(!$('options')) return;
     const n = parseInt(e.key, 10);
     if(n >= 1 && n <= 5){ 
       e.preventDefault(); 
@@ -797,7 +789,7 @@
   }
 
   /* ============================================================
-     报告展示通用逻辑
+     报告展示
      ============================================================ */
   function setAccent(quantumState){
     const map = { good:[80,220,140], danger:[235,65,75], superposition:[90,140,245] };
@@ -1009,51 +1001,4 @@
             extra = '（因浏览器跨域限制，已自动切换为本地智能报告）';
           }
           
-          const fallback = Q.localReport(res, validity);
-          aiBody.innerHTML = `<div style="color:#FFD98A;font-size:12px;margin-bottom:12px;padding:10px;background:rgba(255,217,138,.1);border-radius:8px;">AI 调用提示：${escapeHTML(msg)} ${extra}</div>` + renderMD(fallback);
-        } finally {
-          if(btn) { btn.disabled = false; btn.textContent = '重新生成'; }
-        }
-      });
-    }
-  }
-
-  async function callDeepSeekAPI(cfg, prompt){
-    let res;
-    try {
-      res = await fetch(cfg.url, {
-        method: 'POST',
-        headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.key},
-        body: JSON.stringify({
-          model: cfg.model,
-          messages: [
-            {role: 'system', content: '你是一位教育引导顾问，语气温暖、具体、不评判。面向家长。'},
-            {role: 'user', content: prompt}
-          ],
-          temperature: 0.85,
-          max_tokens: 2400
-        })
-      });
-    } catch(e){ 
-      throw new Error('CORS_OR_NETWORK'); 
-    }
-    
-    if(!res.ok) {
-      const t = await res.text().catch(() => '');
-      throw new Error('API 状态码 ' + res.status + ' ' + t.slice(0, 50));
-    }
-    
-    const data = await res.json();
-    return data.choices[0].message.content;
-  }
-
-  /* ---------- 初始化 ---------- */
-  function init(){
-    const session = loadSession();
-    if(session) currentParent = { email: session.email, phone: session.phone, username: session.username };
-    renderHome();
-  }
-
-  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-  else init();
-})();
+          const fallback =
