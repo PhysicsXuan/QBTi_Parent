@@ -1,5 +1,5 @@
 /* ============================================================
-   QParent —— 家长端逻辑 (含直接测评版)
+   QParent —— 家长端逻辑 (含直接测评版 + 稳健的 AI 生成)
    ============================================================ */
 (function(){
   'use strict';
@@ -776,7 +776,6 @@
   }
 
   function renderReportView(res, validity, aiReportText, updatedAt, extraData){
-    // 防止 res 缺字段
     if(!res || !res.letters) {
        app.innerHTML = '<div class="empty-state">报告数据格式错误</div>';
        return;
@@ -866,22 +865,49 @@
         const btn = $('btnGenAI');
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner"></span>生成中…';
+        const aiBody = $('aiBody');
+        aiBody.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);"><span class="spinner"></span>正在解析孩子的波函数与作答真实性…</div>';
+        
         try {
-          const prompt = Q.buildPrompt(res, validity);
-          const text = await callDeepSeekAPI(prompt);
+          // 获取 API Key 配置
+          const CFG_KEY = 'qbti_config_v2';
+          let cfg = { url: 'https://api.deepseek.com/chat/completions', key: '', model: 'deepseek-chat' };
+          try {
+            const saved = JSON.parse(localStorage.getItem(CFG_KEY) || '{}');
+            if(saved.key) cfg = { ...cfg, ...saved };
+          } catch(e){}
           
-          // 如果是本地报告，保存到本地
+          if(!cfg.key) {
+            throw new Error('未配置 API Key（请在学生端点右下角 ⚙ 设置一次，即可同步到家长端）');
+          }
+
+          const prompt = Q.buildPrompt(res, validity);
+          const text = await callDeepSeekAPI(cfg, prompt);
+          
+          // 保存到本地记录
           const list = getAdhocReports();
-          const currentId = list.find(r => r.result.letters.join('') === baseCode && r.result.suffix.letter === res.suffix.letter)?.id;
-          if(currentId) {
-            const item = list.find(r => r.id === currentId);
-            if(item) { item.aiReportText = text; localStorage.setItem(ADHOC_KEY, JSON.stringify(list)); }
+          let updated = false;
+          for(let i=0; i<list.length; i++){
+            if(list[i].result.letters.join('') === res.letters.join('') && list[i].result.suffix.letter === (res.suffix ? res.suffix.letter : '')){
+              list[i].aiReportText = text;
+              updated = true;
+              break;
+            }
+          }
+          if(updated) localStorage.setItem(ADHOC_KEY, JSON.stringify(list));
+          
+          aiBody.innerHTML = renderMD(text);
+        } catch(err){
+          console.error('AI 生成异常:', err);
+          const msg = String(err.message || err);
+          let extra = '';
+          if(msg.indexOf('CORS_OR_NETWORK') >= 0 || msg.indexOf('Failed to fetch') >= 0){
+            extra = '（因浏览器跨域限制，已自动切换为本地智能报告）';
           }
           
-          $('aiBody').innerHTML = renderMD(text);
-        } catch(err){
+          // 兜底：本地报告
           const fallback = Q.localReport(res, validity);
-          $('aiBody').innerHTML = `<div style="color:#FF9BB5;font-size:12px;margin-bottom:12px;">AI 调用失败：${escapeHTML(err.message)}</div>` + renderMD(fallback);
+          aiBody.innerHTML = `<div style="color:#FFD98A;font-size:12px;margin-bottom:12px;padding:10px;background:rgba(255,217,138,.1);border-radius:8px;">AI 调用提示：${escapeHTML(msg)} ${extra}</div>` + renderMD(fallback);
         } finally {
           if(btn) { btn.disabled = false; btn.textContent = '重新生成'; }
         }
@@ -889,31 +915,32 @@
     }
   }
 
-  /* 简单的 DeepSeek API 调用 */
-  async function callDeepSeekAPI(prompt){
-    const CFG_KEY = 'qbti_config_v2';
-    let cfg = { url: 'https://api.deepseek.com/chat/completions', key: '', model: 'deepseek-chat' };
+  /* 真正的 API 请求（带异常捕获） */
+  async function callDeepSeekAPI(cfg, prompt){
+    let res;
     try {
-      const saved = JSON.parse(localStorage.getItem(CFG_KEY) || '{}');
-      if(saved.key) cfg = { ...cfg, ...saved };
-    } catch(e){}
+      res = await fetch(cfg.url, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.key},
+        body: JSON.stringify({
+          model: cfg.model,
+          messages: [
+            {role: 'system', content: '你是一位教育引导顾问，语气温暖、具体、不评判。面向家长。'},
+            {role: 'user', content: prompt}
+          ],
+          temperature: 0.85,
+          max_tokens: 2400
+        })
+      });
+    } catch(e){ 
+      throw new Error('CORS_OR_NETWORK'); 
+    }
     
-    if(!cfg.key) throw new Error('家长端未配置 API Key。请前往学生端点 ⚙ 配置一次即可。');
+    if(!res.ok) {
+      const t = await res.text().catch(() => '');
+      throw new Error('API 状态码 ' + res.status + ' ' + t.slice(0, 50));
+    }
     
-    const res = await fetch(cfg.url, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.key},
-      body: JSON.stringify({
-        model: cfg.model,
-        messages: [
-          {role: 'system', content: '你是一位教育引导顾问，语气温暖、具体、不评判。面向家长。'},
-          {role: 'user', content: prompt}
-        ],
-        temperature: 0.85,
-        max_tokens: 2400
-      })
-    });
-    if(!res.ok) throw new Error('API 请求失败');
     const data = await res.json();
     return data.choices[0].message.content;
   }
