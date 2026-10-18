@@ -1001,4 +1001,50 @@
             extra = '（因浏览器跨域限制，已自动切换为本地智能报告）';
           }
           
-          const fallback =
+          const fallback = Q.localReport(res, validity);
+          aiBody.innerHTML = `<div style="color:#FFD98A;font-size:12px;margin-bottom:12px;padding:10px;background:rgba(255,217,138,.1);border-radius:8px;">AI 调用提示：${escapeHTML(msg)} ${extra}</div>` + renderMD(fallback);
+        } finally {
+          if(btn) { btn.disabled = false; btn.textContent = '重新生成'; }
+        }
+      });
+    }
+  }
+
+  async function callDeepSeekAPI(cfg, prompt){
+    let res;
+    try {
+      res = await fetch(cfg.url, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.key},
+        body: JSON.stringify({
+          model: cfg.model,
+          messages: [
+            {role: 'system', content: '你是一位教育引导顾问，语气温暖、具体、不评判。面向家长。'},
+            {role: 'user', content: prompt}
+          ],
+          temperature: 0.85,
+          max_tokens: 2400
+        })
+      });
+    } catch(e){ 
+      throw new Error('CORS_OR_NETWORK'); 
+    }
+    
+    if(!res.ok) {
+      const t = await res.text().catch(() => '');
+      throw new Error('API 状态码 ' + res.status + ' ' + t.slice(0, 50));
+    }
+    
+    const data = await res.json();
+    return data.choices[0].message.content;
+  }
+
+  function init(){
+    const session = loadSession();
+    if(session) currentParent = { email: session.email, phone: session.phone, username: session.username };
+    renderHome();
+  }
+
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
