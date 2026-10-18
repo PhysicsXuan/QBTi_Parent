@@ -1,7 +1,7 @@
 /* ============================================================
    QBTI 后端服务器（Neon PostgreSQL 数据库版）
    - 使用 AgentMail 发送验证码
-   - 数据持久化：Neon 提供的免费 PostgreSQL
+   - 邮箱角色互斥校验（学生 / 家长）
    ============================================================ */
 
 const express = require('express');
@@ -38,7 +38,6 @@ const pool = new Pool({
   ssl: DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
-// 监听连接池的错误，防止服务崩溃
 pool.on('error', (err) => {
   console.error('PostgreSQL 连接池异常:', err.message);
 });
@@ -53,6 +52,11 @@ async function initDB() {
       username VARCHAR(100) NOT NULL,
       salt VARCHAR(255) NOT NULL,
       "passwordHash" VARCHAR(255) NOT NULL,
+      "createdAt" BIGINT
+    );`,
+    `CREATE TABLE IF NOT EXISTS student_emails (
+      email VARCHAR(255) PRIMARY KEY,
+      username VARCHAR(100),
       "createdAt" BIGINT
     );`,
     `CREATE TABLE IF NOT EXISTS bindings (
@@ -173,7 +177,7 @@ async function sendCodeEmail(to, code) {
   }
 }
 
-/* ---------- 验证码存储（内存即可） ---------- */
+/* ---------- 验证码存储（内存） ---------- */
 const codeStore = new Map();
 setInterval(() => {
   const now = Date.now();
@@ -181,6 +185,54 @@ setInterval(() => {
     if (val.expiresAt < now && (now - val.lastSentAt) > 10 * 60 * 1000) codeStore.delete(key);
   }
 }, 60 * 1000);
+
+/* ============================================================
+   API: 邮箱角色检查
+   ============================================================ */
+app.get('/api/check-email', async (req, res) => {
+  const { email, role } = req.query;
+  if(!email || !role) return res.status(400).json({ error: '参数不完整' });
+  const targetEmail = email.toLowerCase().trim();
+
+  try {
+    if (role === 'student') {
+      const r = await pool.query('SELECT email FROM parents WHERE email = $1', [targetEmail]);
+      if (r.rows.length > 0) {
+        return res.json({ available: false, msg: '该邮箱已注册为家长账号，请勿重复注册' });
+      }
+    } else if (role === 'parent') {
+      const r = await pool.query('SELECT email FROM student_emails WHERE email = $1', [targetEmail]);
+      if (r.rows.length > 0) {
+        return res.json({ available: false, msg: '该邮箱已注册为学生账号，请勿重复注册' });
+      }
+    }
+    res.json({ available: true });
+  } catch(err) {
+    console.error('[DB] 检查邮箱失败:', err);
+    res.status(500).json({ error: '服务器异常' });
+  }
+});
+
+/* ============================================================
+   API: 学生端同步邮箱到后端
+   ============================================================ */
+app.post('/api/student/sync', async (req, res) => {
+  const { email, username } = req.body;
+  if (!email) return res.status(400).json({ error: '参数不完整' });
+  const targetEmail = email.toLowerCase().trim();
+  try {
+    await pool.query(
+      `INSERT INTO student_emails (email, username, "createdAt") 
+       VALUES ($1, $2, $3) 
+       ON CONFLICT (email) DO NOTHING`,
+      [targetEmail, username || '', Date.now()]
+    );
+    res.json({ success: true });
+  } catch(err) {
+    console.error('[DB] 同步学生邮箱失败:', err);
+    res.status(500).json({ error: '同步失败' });
+  }
+});
 
 /* ============================================================
    API: 发送验证码
@@ -282,9 +334,16 @@ app.post('/api/parent/register', async (req, res) => {
   codeStore.delete(target);
 
   try {
-    const check = await pool.query('SELECT email FROM parents WHERE email = $1', [emailLower]);
-    if (check.rows.length > 0) {
+    // 检查家长表
+    const checkP = await pool.query('SELECT email FROM parents WHERE email = $1', [emailLower]);
+    if (checkP.rows.length > 0) {
       return res.status(409).json({ error: '该邮箱已注册为家长账号' });
+    }
+    
+    // 检查学生表
+    const checkS = await pool.query('SELECT email FROM student_emails WHERE email = $1', [emailLower]);
+    if (checkS.rows.length > 0) {
+      return res.status(409).json({ error: '该邮箱已注册为学生账号，不能同时注册为家长' });
     }
 
     const salt = genSalt();
@@ -338,14 +397,12 @@ app.post('/api/bind/generate', async (req, res) => {
   const se = String(studentEmail).trim().toLowerCase();
 
   try {
-    // 检查上限
     const countRes = await pool.query('SELECT COUNT(*) FROM bindings WHERE "studentEmail" = $1', [se]);
     const boundCount = parseInt(countRes.rows[0].count, 10);
     if (boundCount >= 2) {
       return res.status(409).json({ error: '已达到绑定上限（最多绑定 2 位家长）' });
     }
 
-    // 清理该学生旧的未使用邀请码
     await pool.query('DELETE FROM invites WHERE "studentEmail" = $1 AND used = false', [se]);
 
     const code = genInviteCode();
@@ -436,7 +493,6 @@ app.post('/api/bind/accept', async (req, res) => {
       return res.status(409).json({ error: '您已绑定该学生' });
     }
 
-    // 执行绑定并消耗邀请码
     await pool.query(
       `INSERT INTO bindings ("studentEmail", "studentUsername", "parentEmail", "boundAt") 
        VALUES ($1, $2, $3, $4)`,
@@ -569,6 +625,5 @@ app.listen(PORT, async () => {
   console.log('===========================================');
   console.log('');
   
-  // 启动时自动建表
   await initDB();
 });
