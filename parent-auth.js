@@ -1,5 +1,5 @@
 /* ============================================================
-   QParent —— 家长端逻辑 (含直接测评版 + 稳健的 AI 生成)
+   QParent —— 家长端逻辑 (含摄像头扫码 / 直接测评 / 报告展示)
    ============================================================ */
 (function(){
   'use strict';
@@ -17,6 +17,7 @@
 
   let currentParent = null;
   let codeTimer = null;
+  let html5QrcodeScanner = null; // 扫码实例
 
   // 答题状态
   const qState = {
@@ -428,6 +429,17 @@
 
     loadBoundStudents();
     loadAdhocReports();
+
+    // 检查 URL 参数中是否有邀请码（家长直接扫码跳转过来的情况）
+    const urlParams = new URLSearchParams(window.location.search);
+    const codeParam = urlParams.get('code');
+    if(codeParam) {
+      // 如果当前没有绑定，则自动弹出绑定框
+      window.history.replaceState({}, document.title, window.location.pathname);
+      setTimeout(() => {
+        openBindDialog(codeParam);
+      }, 500);
+    }
   }
 
   async function loadBoundStudents(){
@@ -497,18 +509,38 @@
     });
   }
 
-  /* ---------- 绑定孩子弹窗 ---------- */
-  function openBindDialog(){
+  /* ---------- 绑定孩子弹窗 (含扫码) ---------- */
+  function openBindDialog(prefillCode){
     const old = document.getElementById('bindMask');
     if(old) old.remove();
+    
+    // 如果之前有打开摄像头，先关闭
+    if(html5QrcodeScanner) {
+      try { html5QrcodeScanner.clear(); } catch(e){}
+      html5QrcodeScanner = null;
+    }
+
     const mask = document.createElement('div');
     mask.id = 'bindMask';
     mask.style.cssText = 'position:fixed;inset:0;background:rgba(3,4,12,.86);backdrop-filter:blur(10px);z-index:300;display:grid;place-items:center;padding:20px;';
     mask.innerHTML = `
       <div style="width:100%;max-width:400px;padding:30px 26px;border-radius:20px;border:1px solid rgba(255,255,255,.1);background:#0B0D1C;text-align:center;">
         <div style="font-size:11px;letter-spacing:.22em;color:var(--muted);text-transform:uppercase;margin-bottom:14px;">Bind Child · 绑定孩子</div>
-        <div style="font-size:15px;font-weight:700;color:#fff;margin-bottom:8px;">输入孩子提供的邀请码</div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:20px;line-height:1.7;">请让孩子在学生端「我的账户 → 已绑定的家长」中生成邀请码</div>
+        <div style="font-size:15px;font-weight:700;color:#fff;margin-bottom:8px;">扫描二维码或输入邀请码</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:20px;line-height:1.7;">请让孩子在学生端生成邀请二维码</div>
+        
+        <!-- 扫码按钮 -->
+        <button id="btnStartScan" class="scan-btn" style="width:100%;padding:12px;border-radius:11px;border:1px dashed var(--q-color);background:rgba(var(--q-r),var(--q-g),var(--q-b),.08);color:var(--q-color);font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;margin-bottom:16px;display:flex;align-items:center;justify-content:center;gap:8px;transition:.2s;">
+          📷 打开摄像头扫码
+        </button>
+        
+        <!-- 扫码区域 -->
+        <div id="reader-container">
+          <div id="reader"></div>
+          <button id="btnStopScan" style="width:100%;padding:10px;background:transparent;border:none;color:var(--muted);font-size:12px;cursor:pointer;">取消扫码</button>
+        </div>
+
+        <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">或手动输入 6 位码</div>
         <input id="bindCodeInput" type="text" maxlength="6" placeholder="ABC123"
           style="width:100%;padding:14px 18px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#fff;font-size:20px;font-weight:700;letter-spacing:.24em;text-align:center;text-transform:uppercase;font-family:inherit;outline:none;margin-bottom:14px;" />
         <div id="bindErr" style="color:#FF8FA0;font-size:13px;min-height:18px;margin-bottom:10px;"></div>
@@ -522,10 +554,84 @@
 
     const input = $('bindCodeInput');
     const err = $('bindErr');
-    input.focus();
+    
+    if(prefillCode) {
+      input.value = prefillCode;
+    } else {
+      input.focus();
+    }
+
+    // 扫码逻辑
+    $('btnStartScan').addEventListener('click', () => {
+      startScan();
+    });
+    $('btnStopScan').addEventListener('click', () => {
+      stopScan();
+    });
+
+    function startScan() {
+      if (!window.Html5Qrcode) {
+        err.textContent = '扫码库未加载，请刷新页面重试';
+        return;
+      }
+      $('btnStartScan').style.display = 'none';
+      $('reader-container').style.display = 'block';
+      
+      html5QrcodeScanner = new Html5Qrcode("reader");
+      html5QrcodeScanner.start(
+        { facingMode: "environment" }, // 优先使用后置摄像头
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        (decodedText) => {
+          // 扫码成功回调
+          stopScan();
+          let code = decodedText;
+          // 如果是 URL 链接，提取 ?code= 参数
+          if (decodedText.includes('code=')) {
+            try {
+              const url = new URL(decodedText);
+              code = url.searchParams.get('code') || decodedText;
+            } catch(e) {}
+          }
+          
+          if(/^[A-Z0-9]{6}$/i.test(code)) {
+            input.value = code.toUpperCase();
+            toast('识别成功，正在绑定…', 'ok');
+            submit(); // 自动提交
+          } else {
+            err.textContent = '二维码无效，请确保扫的是邀请码';
+            $('btnStartScan').style.display = 'flex';
+            $('reader-container').style.display = 'none';
+          }
+        },
+        (errorMessage) => {
+          // 忽略扫码过程中的频繁报错
+        }
+      ).catch(err => {
+        console.error('摄像头启动失败', err);
+        err.textContent = '无法启动摄像头。请确保使用 HTTPS 访问，并允许浏览器获取权限';
+        $('btnStartScan').style.display = 'flex';
+        $('reader-container').style.display = 'none';
+      });
+    }
+
+    function stopScan() {
+      if (html5QrcodeScanner) {
+        html5QrcodeScanner.stop().then(() => {
+          html5QrcodeScanner.clear();
+          html5QrcodeScanner = null;
+          $('btnStartScan').style.display = 'flex';
+          $('reader-container').style.display = 'none';
+        }).catch(e => {
+          console.warn('关闭摄像头异常', e);
+          $('btnStartScan').style.display = 'flex';
+          $('reader-container').style.display = 'none';
+        });
+      }
+    }
+
     input.addEventListener('keydown', e => { if(e.key === 'Enter') submit(); });
-    $('bindCancel').addEventListener('click', () => mask.remove());
-    mask.addEventListener('click', e => { if(e.target === mask) mask.remove(); });
+    $('bindCancel').addEventListener('click', () => { stopScan(); mask.remove(); });
+    mask.addEventListener('click', e => { if(e.target === mask) { stopScan(); mask.remove(); } });
     $('bindSubmit').addEventListener('click', submit);
 
     async function submit(){
@@ -548,6 +654,7 @@
           btn.textContent = '确认绑定';
           return;
         }
+        stopScan();
         mask.remove();
         toast('绑定成功：' + (r.studentUsername || r.studentEmail), 'ok');
         renderDashboard();
@@ -690,7 +797,7 @@
   }
 
   /* ============================================================
-     报告展示通用逻辑 (兼容完整 result 与扁平 payload)
+     报告展示通用逻辑
      ============================================================ */
   function setAccent(quantumState){
     const map = { good:[80,220,140], danger:[235,65,75], superposition:[90,140,245] };
@@ -730,7 +837,6 @@
       }
       
       const p = data.report.payload;
-      // 兼容处理：如果存在 fullResult 则直接用，否则用 payload 的扁平数据重构
       let fullResult = p.fullResult;
       if (!fullResult) {
         fullResult = {
@@ -740,7 +846,7 @@
           dimLeadInfo: p.dimLeadInfo || {},
           suffixRatio: p.suffixRatio || {},
           suffixGap: p.suffixGap || 0,
-          dominanceScore: {} // 旧数据可能没存，会导致整体态分析失败
+          dominanceScore: {}
         };
       }
       
@@ -869,7 +975,6 @@
         aiBody.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);"><span class="spinner"></span>正在解析孩子的波函数与作答真实性…</div>';
         
         try {
-          // 获取 API Key 配置
           const CFG_KEY = 'qbti_config_v2';
           let cfg = { url: 'https://api.deepseek.com/chat/completions', key: '', model: 'deepseek-chat' };
           try {
@@ -884,7 +989,6 @@
           const prompt = Q.buildPrompt(res, validity);
           const text = await callDeepSeekAPI(cfg, prompt);
           
-          // 保存到本地记录
           const list = getAdhocReports();
           let updated = false;
           for(let i=0; i<list.length; i++){
@@ -905,7 +1009,6 @@
             extra = '（因浏览器跨域限制，已自动切换为本地智能报告）';
           }
           
-          // 兜底：本地报告
           const fallback = Q.localReport(res, validity);
           aiBody.innerHTML = `<div style="color:#FFD98A;font-size:12px;margin-bottom:12px;padding:10px;background:rgba(255,217,138,.1);border-radius:8px;">AI 调用提示：${escapeHTML(msg)} ${extra}</div>` + renderMD(fallback);
         } finally {
@@ -915,7 +1018,6 @@
     }
   }
 
-  /* 真正的 API 请求（带异常捕获） */
   async function callDeepSeekAPI(cfg, prompt){
     let res;
     try {
