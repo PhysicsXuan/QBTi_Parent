@@ -1,12 +1,14 @@
 /* ============================================================
-   QParent —— 家长端逻辑 (含摄像头扫码 / 直接测评 / 报告展示)
+   QParent —— 家长端逻辑（纯数据查看版）
+   - 注册 / 登录
+   - 扫码 / 邀请码绑定孩子
+   - 查看绑定孩子的报告
    ============================================================ */
 (function(){
   'use strict';
 
   const Q = window.QBTI;
   const SESSION_KEY = 'qparent_session_v1';
-  const ADHOC_KEY = 'qparent_adhoc_reports';
   const SESSION_DURATION = 30 * 24 * 60 * 60 * 1000;
   const CODE_COOLDOWN = 60 * 1000;
   const API_BASE = '';
@@ -18,17 +20,6 @@
   let currentParent = null;
   let codeTimer = null;
   let html5QrcodeScanner = null;
-
-  const qState = {
-    idx: 0,
-    answers: {},
-    timings: {},
-    questionShownAt: {},
-    locked: false,
-    result: null,
-    validity: null,
-    aiReportText: null
-  };
 
   function escapeHTML(s){
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -69,17 +60,6 @@
   function clearSession(){
     try { localStorage.removeItem(SESSION_KEY); } catch(e){}
     currentParent = null;
-  }
-
-  /* ---------- Adhoc Reports Storage ---------- */
-  function getAdhocReports(){
-    try { return JSON.parse(localStorage.getItem(ADHOC_KEY) || '[]'); } catch(e){ return []; }
-  }
-  function saveAdhocReport(report){
-    const list = getAdhocReports();
-    list.unshift(report);
-    if(list.length > 10) list.length = 10;
-    localStorage.setItem(ADHOC_KEY, JSON.stringify(list));
   }
 
   /* ---------- Auth Modal ---------- */
@@ -423,20 +403,12 @@
       <div class="student-list" id="studentList">
         <div class="empty-state">正在加载…</div>
       </div>
-
-      <div class="topbar" style="margin-top:40px;margin-bottom:24px;">
-        <div style="font-size:13px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;">直接测评（无需绑定）</div>
-        <button class="add-adhoc-btn" id="btnStartAdhoc">+ 开始新测评</button>
-      </div>
-      <div class="student-list" id="adhocList"></div>
     `;
     
     $('btnLogout').addEventListener('click', () => { clearSession(); renderHome(); });
     $('btnAddStudent').addEventListener('click', openBindDialog);
-    $('btnStartAdhoc').addEventListener('click', startQuiz);
 
     loadBoundStudents();
-    loadAdhocReports();
 
     const urlParams = new URLSearchParams(window.location.search);
     const codeParam = urlParams.get('code');
@@ -484,37 +456,7 @@
     }
   }
 
-  function loadAdhocReports(){
-    const el = $('adhocList');
-    const list = getAdhocReports();
-    if(list.length === 0){
-      el.innerHTML = '<div class="empty-state" style="padding:30px 20px;font-size:13px;">暂无记录，点击上方「开始新测评」为孩子生成报告。</div>';
-      return;
-    }
-    el.innerHTML = list.map(r => {
-      const badge = '<span class="sc-badge" style="background:rgba(255,138,72,.14);color:#FF8A48;border-color:rgba(255,138,72,.3);">未绑定</span>';
-      const typeName = Q.TYPE_NAMES[r.result.letters.join('')] || '';
-      return `<div class="student-card" data-type="adhoc" data-id="${r.id}">
-        <div class="sc-head">
-          <div class="sc-avatar" style="background:#FF8A48;">测</div>
-          <div class="sc-info">
-            <div class="sc-name">${escapeHTML(r.result.letters.join(''))}-${r.result.suffix.letter} · ${escapeHTML(typeName)}</div>
-            <div class="sc-meta">测试时间：${formatTime(r.timestamp)}</div>
-          </div>
-          ${badge}
-        </div>
-      </div>`;
-    }).join('');
-    
-    el.querySelectorAll('.student-card').forEach(card => {
-      card.addEventListener('click', () => {
-        const id = card.dataset.id;
-        const report = getAdhocReports().find(r => r.id === id);
-        if(report) renderReportView(report.result, report.validity, report.aiReportText);
-      });
-    });
-  }
-
+  /* ---------- 绑定弹窗（含扫码） ---------- */
   function openBindDialog(prefillCode){
     const old = document.getElementById('bindMask');
     if(old) old.remove();
@@ -657,135 +599,6 @@
         btn.textContent = '确认绑定';
       }
     }
-  }
-
-  /* ============================================================
-     家长直接答题逻辑
-     ============================================================ */
-  function startQuiz(){
-    qState.idx = 0;
-    qState.answers = {};
-    qState.timings = {};
-    qState.questionShownAt = {};
-    qState.locked = false;
-    qState.result = null;
-    qState.validity = null;
-    qState.aiReportText = null;
-    
-    renderQuiz();
-  }
-
-  function renderGroupStrip(){
-    const cur = Q.QUESTIONS[qState.idx].group;
-    const labels = ['潜能开放度','内在驱动力','学习自主性','未知应对方式'];
-    return [1,2,3,4].map(g => {
-      let cls = 'group-dot';
-      if(g < cur) cls += ' done'; else if(g === cur) cls += ' active';
-      return `<span class="${cls}"><span class="gd-num">0${g}</span> ${labels[g-1]}</span>`;
-    }).join('');
-  }
-
-  function renderQuiz(){
-    const q = Q.QUESTIONS[qState.idx];
-    if(!qState.questionShownAt[q.id]) qState.questionShownAt[q.id] = Date.now();
-    
-    app.innerHTML = `
-      <button class="back-btn" id="btnQuitQuiz">← 放弃并返回</button>
-      <div class="screen active">
-        <div class="quiz-head">
-          <div class="progress-track"><div class="progress-fill" id="progFill" style="width:${(qState.idx / Q.QUESTIONS.length * 100)}%"></div></div>
-          <div class="progress-text"><b>${qState.idx + 1}</b> / ${Q.QUESTIONS.length}</div>
-        </div>
-        <div class="group-strip" id="groupStrip">${renderGroupStrip()}</div>
-        <div class="quiz-card">
-          <h2 class="q-text">${q.text}</h2>
-          <div class="options" id="options">
-            ${Q.OPTIONS.map((o, i) => `
-              <button class="opt" data-v="${o.v}">
-                <span class="num">${i+1}</span><span class="dot"></span><span>${o.t}</span>
-              </button>
-            `).join('')}
-          </div>
-        </div>
-        <div class="quiz-foot">
-          <button class="btn sm" id="btnPrev" ${qState.idx === 0 ? 'disabled' : ''}>← 上一题</button>
-          <span class="hint">键盘 1–5 可快速作答</span>
-        </div>
-      </div>
-    `;
-    
-    $('btnQuitQuiz').addEventListener('click', () => {
-      if(confirm('确定要放弃本次测评吗？')) renderDashboard();
-    });
-    $('btnPrev').addEventListener('click', () => {
-      if(qState.idx > 0 && !qState.locked) { qState.idx--; renderQuiz(); }
-    });
-    
-    const optionsEl = $('options');
-    optionsEl.addEventListener('click', e => {
-      const btn = e.target.closest('.opt');
-      if(btn) answerQuiz(parseInt(btn.dataset.v, 10), optionsEl);
-    });
-
-    const chosen = qState.answers[q.id];
-    if(chosen != null){
-      const el = optionsEl.querySelector(`[data-v="${chosen}"]`);
-      if(el) el.classList.add('selected');
-    }
-  }
-
-  function answerQuiz(val, optionsEl){
-    if(qState.locked) return;
-    qState.locked = true;
-    const q = Q.QUESTIONS[qState.idx];
-    qState.answers[q.id] = val;
-    
-    if(qState.timings[q.id] == null && qState.questionShownAt[q.id]){
-      qState.timings[q.id] = Math.max(0.1, (Date.now() - qState.questionShownAt[q.id]) / 1000);
-    }
-    
-    optionsEl.querySelectorAll('.opt').forEach(el => el.classList.remove('selected'));
-    const sel = optionsEl.querySelector(`[data-v="${val}"]`);
-    if(sel) sel.classList.add('selected');
-    
-    setTimeout(() => {
-      qState.locked = false;
-      qState.idx++;
-      if(qState.idx >= Q.QUESTIONS.length) finishQuiz();
-      else renderQuiz();
-    }, 240);
-  }
-
-  document.addEventListener('keydown', e => {
-    if(!$('options')) return;
-    const n = parseInt(e.key, 10);
-    if(n >= 1 && n <= 5){ 
-      e.preventDefault(); 
-      const optionsEl = $('options');
-      if(optionsEl) answerQuiz(n, optionsEl);
-    }
-    if(e.key === 'Backspace' && qState.idx > 0 && !qState.locked){
-      e.preventDefault();
-      qState.idx--;
-      renderQuiz();
-    }
-  });
-
-  function finishQuiz(){
-    qState.result = Q.computeResult(qState.answers);
-    qState.validity = Q.analyzeResponseValidity(qState.answers, qState.timings);
-    
-    const reportId = 'adhoc_' + Date.now();
-    saveAdhocReport({
-      id: reportId,
-      timestamp: Date.now(),
-      result: qState.result,
-      validity: qState.validity,
-      aiReportText: null
-    });
-
-    renderReportView(qState.result, qState.validity, null);
-    toast('测评完成！', 'ok');
   }
 
   /* ============================================================
@@ -941,11 +754,10 @@
       <div class="card">${dimsHTML}</div>
 
       <div class="title">AI 引导报告</div>
-      <div class="card ai-body" id="aiBody">
+      <div class="card ai-body">
         ${aiReportText ? renderMD(aiReportText) : `
-          <div style="text-align:center;padding:20px 0;">
-            <div style="color:var(--muted);font-size:13px;margin-bottom:14px;">尚未生成 AI 报告</div>
-            <button class="btn primary sm" id="btnGenAI">✨ 生成 AI 报告</button>
+          <div style="text-align:center;padding:20px 0;color:var(--muted);font-size:13px;line-height:1.8;">
+            孩子尚未生成 AI 报告。<br>请提醒孩子在学生端点击「生成报告」。
           </div>
         `}
       </div>
@@ -957,86 +769,6 @@
     
     $('btnBack').addEventListener('click', renderDashboard);
     $('btnBackBottom').addEventListener('click', renderDashboard);
-
-    if(!aiReportText && $('btnGenAI')){
-      $('btnGenAI').addEventListener('click', async () => {
-        const btn = $('btnGenAI');
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner"></span>生成中…';
-        const aiBody = $('aiBody');
-        aiBody.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);"><span class="spinner"></span>正在解析孩子的波函数与作答真实性…</div>';
-        
-        try {
-          const CFG_KEY = 'qbti_config_v2';
-          let cfg = { url: 'https://api.deepseek.com/chat/completions', key: '', model: 'deepseek-chat' };
-          try {
-            const saved = JSON.parse(localStorage.getItem(CFG_KEY) || '{}');
-            if(saved.key) cfg = { ...cfg, ...saved };
-          } catch(e){}
-          
-          if(!cfg.key) {
-            throw new Error('未配置 API Key（请在学生端点右下角 ⚙ 设置一次，即可同步到家长端）');
-          }
-
-          const prompt = Q.buildPrompt(res, validity);
-          const text = await callDeepSeekAPI(cfg, prompt);
-          
-          const list = getAdhocReports();
-          let updated = false;
-          for(let i=0; i<list.length; i++){
-            if(list[i].result.letters.join('') === res.letters.join('') && list[i].result.suffix.letter === (res.suffix ? res.suffix.letter : '')){
-              list[i].aiReportText = text;
-              updated = true;
-              break;
-            }
-          }
-          if(updated) localStorage.setItem(ADHOC_KEY, JSON.stringify(list));
-          
-          aiBody.innerHTML = renderMD(text);
-        } catch(err){
-          console.error('AI 生成异常:', err);
-          const msg = String(err.message || err);
-          let extra = '';
-          if(msg.indexOf('CORS_OR_NETWORK') >= 0 || msg.indexOf('Failed to fetch') >= 0){
-            extra = '（因浏览器跨域限制，已自动切换为本地智能报告）';
-          }
-          
-          const fallback = Q.localReport(res, validity);
-          aiBody.innerHTML = `<div style="color:#FFD98A;font-size:12px;margin-bottom:12px;padding:10px;background:rgba(255,217,138,.1);border-radius:8px;">AI 调用提示：${escapeHTML(msg)} ${extra}</div>` + renderMD(fallback);
-        } finally {
-          if(btn) { btn.disabled = false; btn.textContent = '重新生成'; }
-        }
-      });
-    }
-  }
-
-  async function callDeepSeekAPI(cfg, prompt){
-    let res;
-    try {
-      res = await fetch(cfg.url, {
-        method: 'POST',
-        headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.key},
-        body: JSON.stringify({
-          model: cfg.model,
-          messages: [
-            {role: 'system', content: '你是一位教育引导顾问，语气温暖、具体、不评判。面向家长。'},
-            {role: 'user', content: prompt}
-          ],
-          temperature: 0.85,
-          max_tokens: 2400
-        })
-      });
-    } catch(e){ 
-      throw new Error('CORS_OR_NETWORK'); 
-    }
-    
-    if(!res.ok) {
-      const t = await res.text().catch(() => '');
-      throw new Error('API 状态码 ' + res.status + ' ' + t.slice(0, 50));
-    }
-    
-    const data = await res.json();
-    return data.choices[0].message.content;
   }
 
   function init(){
