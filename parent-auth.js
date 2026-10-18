@@ -82,7 +82,7 @@
     localStorage.setItem(ADHOC_KEY, JSON.stringify(list));
   }
 
-  /* ---------- Auth Modal (与原版一致) ---------- */
+  /* ---------- Auth Modal ---------- */
   function buildAuthModal(){
     const mask = document.createElement('div');
     mask.className = 'auth-mask';
@@ -690,7 +690,7 @@
   }
 
   /* ============================================================
-     报告展示通用逻辑 (可复用同步报告和本地报告)
+     报告展示通用逻辑 (兼容完整 result 与扁平 payload)
      ============================================================ */
   function setAccent(quantumState){
     const map = { good:[80,220,140], danger:[235,65,75], superposition:[90,140,245] };
@@ -715,14 +715,39 @@
     try {
       const res = await fetch(API_BASE + '/api/parent/report/' + encodeURIComponent(studentEmail) +
         '?parentEmail=' + encodeURIComponent(currentParent.email));
+      
+      if(!res.ok) {
+        let errMsg = '加载失败';
+        try { const d = await res.json(); errMsg = d.error || errMsg; } catch(e){}
+        renderReportError(errMsg);
+        return;
+      }
+      
       const data = await res.json();
-      if(!res.ok || !data.success) {
+      if(!data.success) {
         renderReportError(data.error || '加载失败');
         return;
       }
-      renderReportView(data.report.payload, data.report.payload.validity, data.report.payload.aiReport, data.report.updatedAt);
+      
+      const p = data.report.payload;
+      // 兼容处理：如果存在 fullResult 则直接用，否则用 payload 的扁平数据重构
+      let fullResult = p.fullResult;
+      if (!fullResult) {
+        fullResult = {
+          letters: p.baseCode ? p.baseCode.split('') : [],
+          suffix: { letter: p.suffixLetter || 'E', name: p.suffixName || '探索型' },
+          dimGroupRatio: p.dimGroupRatio || {},
+          dimLeadInfo: p.dimLeadInfo || {},
+          suffixRatio: p.suffixRatio || {},
+          suffixGap: p.suffixGap || 0,
+          dominanceScore: {} // 旧数据可能没存，会导致整体态分析失败
+        };
+      }
+      
+      renderReportView(fullResult, p.validity, p.aiReport, data.report.updatedAt, p);
     } catch(err){
-      renderReportError('无法连接服务器');
+      console.error('[报告加载错误]', err);
+      renderReportError('请求异常：' + err.message);
     }
   }
 
@@ -750,11 +775,24 @@
     }).join('');
   }
 
-  function renderReportView(res, validity, aiReportText, updatedAt){
+  function renderReportView(res, validity, aiReportText, updatedAt, extraData){
+    // 防止 res 缺字段
+    if(!res || !res.letters) {
+       app.innerHTML = '<div class="empty-state">报告数据格式错误</div>';
+       return;
+    }
+
     const baseCode = res.letters.join('');
-    const typeName = Q.TYPE_NAMES[baseCode] || '';
-    const qs = Q.analyzeQuantumState(res);
-    setAccent(qs.type);
+    const typeName = Q.TYPE_NAMES[baseCode] || (extraData ? extraData.typeName : '') || '未知类型';
+    
+    let qStateType = 'superposition';
+    if (res.dominanceScore && Object.keys(res.dominanceScore).length > 0) {
+       const qs = Q.analyzeQuantumState(res);
+       qStateType = qs.type;
+    } else if (extraData && extraData.quantumState) {
+       qStateType = extraData.quantumState;
+    }
+    setAccent(qStateType);
 
     const vColorMap = { high:'#50DC8C', medium:'#FFD98A', low:'#FF8A48', very_low:'#EB414B' };
     const vColor = validity ? (vColorMap[validity.level] || '#8B90B8') : '#8B90B8';
@@ -765,10 +803,10 @@
       ? '作答用时约 ' + Math.round(validity.totalTime) + ' 秒' : '';
 
     const dimsHTML = Q.DIMS.map(d => {
-      const ratio = res.dimGroupRatio[d.id];
-      const info = res.dimLeadInfo[d.id];
+      const ratio = res.dimGroupRatio[d.id] || {};
+      const info = res.dimLeadInfo[d.id] || { lead: '-' };
       const segs = d.letters.map(l => {
-        const pct = ratio[l];
+        const pct = ratio[l] || 0;
         return `<div class="seg" style="width:${pct}%;background:${DIM_COLORS[d.id][l]};">${pct >= 10 ? l : ''}</div>`;
       }).join('');
       return `<div class="dim-row">
@@ -782,8 +820,8 @@
       <button class="back-btn" id="btnBack">← 返回列表</button>
       
       <div class="hero">
-        <div class="code">${baseCode}<span style="font-size:0.7em;color:var(--q-color)">-${res.suffix.letter}</span></div>
-        <div class="name">${escapeHTML(typeName)} · ${escapeHTML(res.suffix.name)}</div>
+        <div class="code">${baseCode}<span style="font-size:0.7em;color:var(--q-color)">-${res.suffix ? res.suffix.letter : ''}</span></div>
+        <div class="name">${escapeHTML(typeName)} · ${res.suffix ? escapeHTML(res.suffix.name) : ''}</div>
         <div class="sub">量子学习类型</div>
         ${updatedAt ? `<div style="font-size:11.5px;color:var(--muted);margin-top:6px;">最近更新：${formatTime(updatedAt)}</div>` : ''}
       </div>
@@ -829,11 +867,10 @@
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner"></span>生成中…';
         try {
-          // 注意：这里需要您配置 API Key，如果没有配置则走本地保底
           const prompt = Q.buildPrompt(res, validity);
           const text = await callDeepSeekAPI(prompt);
           
-          // 保存到本地
+          // 如果是本地报告，保存到本地
           const list = getAdhocReports();
           const currentId = list.find(r => r.result.letters.join('') === baseCode && r.result.suffix.letter === res.suffix.letter)?.id;
           if(currentId) {
@@ -843,7 +880,6 @@
           
           $('aiBody').innerHTML = renderMD(text);
         } catch(err){
-          // 保底本地报告
           const fallback = Q.localReport(res, validity);
           $('aiBody').innerHTML = `<div style="color:#FF9BB5;font-size:12px;margin-bottom:12px;">AI 调用失败：${escapeHTML(err.message)}</div>` + renderMD(fallback);
         } finally {
@@ -853,7 +889,7 @@
     }
   }
 
-  /* 简单的 DeepSeek API 调用 (复用学生端逻辑，建议配置 Key) */
+  /* 简单的 DeepSeek API 调用 */
   async function callDeepSeekAPI(prompt){
     const CFG_KEY = 'qbti_config_v2';
     let cfg = { url: 'https://api.deepseek.com/chat/completions', key: '', model: 'deepseek-chat' };
