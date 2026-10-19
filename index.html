@@ -3,989 +3,127 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>QUANTUM · QBTI</title>
+<title>QBTI · 家长端</title>
+<!-- 引入扫码库 -->
+<script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
 <style>
 :root{--q-r:255;--q-g:138;--q-b:72;--q-color:rgb(var(--q-r),var(--q-g),var(--q-b));--txt:#E9EBFF;--muted:#8B90B8;}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
-body{background:#000;color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;overflow-x:hidden;-webkit-font-smoothing:antialiased;line-height:1.65;}
-.app{position:relative;z-index:1;min-height:100vh;display:flex;flex-direction:column}
-.screen{display:none;flex:1;padding:56px 22px 80px;max-width:980px;margin:0 auto;width:100%}
-.screen.active{display:block}
-.btn{border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.035);color:#fff;padding:13px 26px;border-radius:12px;font-size:15px;cursor:pointer;transition:.25s;font-family:inherit;}
-.btn:hover{border-color:rgba(var(--q-r),var(--q-g),var(--q-b),.7);background:rgba(var(--q-r),var(--q-g),var(--q-b),.09)}
-.btn:disabled{opacity:.32;cursor:not-allowed}
-.btn.primary{background:var(--q-color);border:none;color:#fff;font-weight:700;box-shadow:0 0 32px rgba(var(--q-r),var(--q-g),var(--q-b),.24);}
-.btn.sm{padding:9px 18px;font-size:13.5px;border-radius:10px}
-.btn.ghost{background:transparent}
-.badge{display:inline-flex;align-items:center;gap:8px;padding:7px 15px;border-radius:99px;font-size:12px;letter-spacing:.14em;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.035);color:rgba(255,255,255,.62);text-transform:uppercase;margin-bottom:26px;}
-.badge::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--q-color);box-shadow:0 0 10px var(--q-color);animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
-.hero h1{font-size:clamp(34px,7.2vw,58px);font-weight:800;line-height:1.16;letter-spacing:-.02em;margin-bottom:20px;color:#fff}
-.hero h1 .grad{background:linear-gradient(110deg,#fff,var(--q-color));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
-.lead{color:var(--muted);font-size:clamp(15px,2.4vw,17px);max-width:620px;margin-bottom:34px}
-.hero-actions{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:56px}
-.dim-preview{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
-.pv-card{padding:20px;border-radius:16px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.025);}
-.pv-idx{font-size:11px;color:var(--q-color);letter-spacing:.18em;font-weight:700}
-.pv-name{font-size:16px;font-weight:700;margin:8px 0 4px;color:#fff}
-.pv-en{font-size:11.5px;color:var(--muted);margin-bottom:12px}
-.pv-tags{display:flex;flex-wrap:wrap;gap:6px}
-.pv-tag{font-size:11px;padding:3px 9px;border-radius:6px;background:rgba(255,255,255,.06);color:#B7BCE0}
-.quiz-head{display:flex;align-items:center;gap:16px;margin-bottom:22px}
-.progress-track{flex:1;height:4px;background:rgba(255,255,255,.08);border-radius:99px;overflow:hidden}
-.progress-fill{height:100%;width:0;border-radius:99px;background:var(--q-color);transition:width .45s}
-.progress-text{font-size:13px;color:var(--muted);white-space:nowrap}
-.progress-text b{color:#fff;font-weight:700}
-.group-strip{display:flex;gap:6px;justify-content:center;margin-bottom:34px;flex-wrap:wrap}
-.group-dot{display:flex;align-items:center;gap:6px;padding:5px 11px;border-radius:99px;font-size:11px;border:1px solid rgba(255,255,255,.10);color:var(--muted);background:rgba(255,255,255,.02);transition:.3s;}
-.group-dot.done{border-color:rgba(var(--q-r),var(--q-g),var(--q-b),.4);color:#B7BCE0;background:rgba(var(--q-r),var(--q-g),var(--q-b),.08)}
-.group-dot.active{border-color:rgba(var(--q-r),var(--q-g),var(--q-b),.75);color:#fff;background:rgba(var(--q-r),var(--q-g),var(--q-b),.15);}
-.group-dot .gd-num{font-weight:700}
-.quiz-card{padding:38px 32px;border-radius:22px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.025);}
-.q-text{font-size:clamp(19px,3.4vw,25px);font-weight:700;line-height:1.5;color:#fff}
-.options{display:flex;flex-direction:column;gap:11px;margin-top:32px}
-.opt{display:flex;align-items:center;gap:14px;width:100%;padding:15px 20px;border-radius:14px;text-align:left;border:1px solid rgba(255,255,255,.11);background:rgba(255,255,255,.018);color:var(--txt);font-size:15px;font-family:inherit;cursor:pointer;transition:.2s;}
-.opt:hover{border-color:rgba(var(--q-r),var(--q-g),var(--q-b),.62);background:rgba(var(--q-r),var(--q-g),var(--q-b),.08);transform:translateX(5px)}
-.opt.selected{border-color:rgba(var(--q-r),var(--q-g),var(--q-b),.62);background:rgba(var(--q-r),var(--q-g),var(--q-b),.08);}
-.opt .dot{width:9px;height:9px;border-radius:50%;border:2px solid var(--muted);flex-shrink:0;}
-.opt.selected .dot{background:var(--q-color);border-color:var(--q-color);}
-.opt .num{font-size:11px;color:var(--muted);width:14px}
-.quiz-foot{margin-top:26px;display:flex;justify-content:space-between;align-items:center}
-.hint{font-size:12px;color:var(--muted);opacity:.65}
-.result-hero{text-align:center;padding:22px 0 12px}
-.type-portrait{width:min(280px,72vw);height:210px;margin:0 auto 14px;display:flex;align-items:flex-end;justify-content:center;position:relative}
-.type-portrait::before{content:'';position:absolute;width:190px;height:38px;bottom:4px;border-radius:50%;background:radial-gradient(ellipse,rgba(var(--q-r),var(--q-g),var(--q-b),.30),rgba(var(--q-r),var(--q-g),var(--q-b),0) 70%);filter:blur(8px);}
-.type-portrait img{position:relative;z-index:1;width:100%;height:100%;object-fit:contain;display:block;filter:drop-shadow(0 14px 24px rgba(0,0,0,.32));}
-.r-label{font-size:12px;letter-spacing:.22em;color:var(--muted);text-transform:uppercase;margin-bottom:18px}
-.code{font-size:clamp(40px,9.5vw,72px);font-weight:800;letter-spacing:.06em;line-height:1.05;background:linear-gradient(110deg,#fff,var(--q-color));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
-.code .code-suffix{color:var(--q-color);-webkit-text-fill-color:var(--q-color);}
-.type-name{margin-top:18px;font-size:clamp(20px,3.8vw,28px);font-weight:800;color:#fff;letter-spacing:.08em;text-shadow:0 0 24px rgba(var(--q-r),var(--q-g),var(--q-b),.4);}
-.type-name .tn-suffix{font-size:.72em;color:#9EEBFF;font-weight:700;}
-.r-tagline{color:var(--muted);font-size:14.5px;max-width:680px;margin:24px auto 0;line-height:1.75}
-.section-title{font-size:13px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;margin:52px 0 18px;display:flex;align-items:center;gap:12px;}
-.section-title::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,rgba(255,255,255,.1),transparent)}
-.dim-stacks{display:flex;flex-direction:column;gap:16px;margin-top:36px}
-.dim-stack-card{padding:20px 22px 18px;border-radius:18px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.025);}
-.dsc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;flex-wrap:wrap}
-.dsc-title{font-size:15.5px;font-weight:700;color:#fff}
-.dsc-en{font-size:11px;color:var(--muted);margin-top:2px}
-.dsc-lead{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted);flex-wrap:wrap}
-.dsc-lead-letter{display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;padding:0 9px;border-radius:8px;font-weight:800;font-size:13px;color:#fff;}
-.dsc-gap{padding:3px 9px;border-radius:6px;font-size:10.5px;font-weight:600;background:rgba(255,255,255,.06);color:#C6CBF5;}
-.dsc-gap.clear{color:#9EEBFF;background:rgba(0,229,255,.12)}
-.dsc-gap.moderate{color:#FFD98A;background:rgba(255,217,138,.12)}
-.dsc-gap.weak{color:#FFB4CB;background:rgba(255,107,157,.12)}
-.dsc-bar{display:flex;height:44px;border-radius:12px;overflow:hidden;background:rgba(255,255,255,.04);}
-.dsc-seg{display:flex;align-items:center;justify-content:center;gap:6px;height:100%;min-width:0;color:#fff;font-weight:700;overflow:hidden;white-space:nowrap;transition:width 1s;}
-.dsc-seg-letter{font-size:14px;font-weight:800}
-.dsc-seg-pct{font-size:12.5px;font-weight:700}
-.dsc-seg.small .dsc-seg-pct{display:none}
-.dsc-seg.tiny .dsc-seg-letter,.dsc-seg.tiny .dsc-seg-pct{display:none}
-.dsc-legend{display:flex;flex-wrap:wrap;gap:16px;margin-top:12px}
-.dsc-leg{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
-.dsc-leg.lead{color:#fff;font-weight:700}
-.dsc-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
-.vector-section{margin-top:36px;padding:26px 22px;border-radius:20px;border:1px solid rgba(var(--q-r),var(--q-g),var(--q-b),.32);background:rgba(255,255,255,.025);}
-.vector-head{text-align:center;margin-bottom:22px}
-.vector-title{font-size:14px;letter-spacing:.18em;color:#9EEBFF;font-weight:700;margin-bottom:6px}
-.vector-sub{font-size:12px;color:var(--muted);line-height:1.6;max-width:560px;margin:0 auto}
-.vector-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
-.vector-card{padding:16px;border-radius:14px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.03);}
-.vector-card.top{border-color:rgba(var(--q-r),var(--q-g),var(--q-b),.75);background:rgba(var(--q-r),var(--q-g),var(--q-b),.12);}
-.vector-card .vc-letter{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;font-weight:800;font-size:14px;background:rgba(255,255,255,.08);color:var(--muted);margin-bottom:10px;}
-.vector-card.top .vc-letter{background:var(--q-color);color:#fff}
-.vector-card .vc-name{font-size:14.5px;font-weight:700;margin-bottom:3px;color:#fff}
-.vector-card .vc-en{font-size:10.5px;color:var(--muted);margin-bottom:12px}
-.vector-card .vc-pct{font-size:24px;font-weight:800;color:var(--q-color);line-height:1;}
-.vector-card.top .vc-pct{color:#fff}
-.vector-card .vc-bar{height:4px;background:rgba(255,255,255,.08);border-radius:99px;overflow:hidden;margin-top:10px}
-.vector-card .vc-fill{height:100%;width:0;border-radius:99px;background:var(--q-color);transition:width .9s;}
-.vector-card .vc-desc{font-size:11.5px;color:#A8AEDA;margin-top:10px;line-height:1.55}
-.ai-panel{margin-top:18px;padding:26px;border-radius:20px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.025);}
-.ai-head{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}
-.ai-head h3{font-size:17px;font-weight:700;display:flex;align-items:center;gap:9px;color:#fff}
-.ai-head h3::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--q-color);}
-.ai-body{margin-top:20px;font-size:14.5px;line-height:1.85;color:#C9CEEE}
-.ai-body p{margin-bottom:14px}
-.ai-body h4{font-size:15px;color:#CBBEFF;margin:20px 0 8px}
-.ai-body strong{color:#fff}
-.ai-body ul{margin:8px 0 16px;padding-left:4px;list-style:none}
-.ai-body li{position:relative;padding-left:18px;margin-bottom:8px}
-.ai-body li::before{content:'▸';position:absolute;left:0;color:var(--q-color)}
-.ai-empty{color:var(--muted);font-size:14px;padding:8px 0}
-.spinner{width:15px;height:15px;border:2px solid rgba(255,255,255,.2);border-top-color:var(--q-color);border-radius:50%;display:inline-block;animation:spin .7s linear infinite;vertical-align:-2px;margin-right:8px}
-@keyframes spin{to{transform:rotate(360deg)}}
-.result-actions{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:48px}
-.modal-mask{position:fixed;inset:0;background:rgba(3,4,12,.82);backdrop-filter:blur(6px);z-index:50;display:none;place-items:center;padding:20px;}
-.modal-mask.show{display:grid}
-.modal{width:100%;max-width:480px;padding:28px;border-radius:20px;border:1px solid rgba(255,255,255,.1);background:#0B0D1C;}
-.modal h3{font-size:17px;margin-bottom:6px;color:#fff}
-.modal p.sub{font-size:12.5px;color:var(--muted);margin-bottom:22px;line-height:1.7}
-.field{margin-bottom:16px}
-.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:7px}
-.field input{width:100%;padding:11px 14px;border-radius:10px;font-size:13.5px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:var(--txt);font-family:inherit;outline:none;}
-.field input:focus{border-color:var(--q-color)}
-.modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:24px;flex-wrap:wrap}
-.test-result{margin-top:14px;font-size:12.5px;line-height:1.7;padding:10px 14px;border-radius:10px;display:none}
-.test-result.show{display:block}
-.test-result.ok{background:rgba(0,229,255,.08);border:1px solid rgba(0,229,255,.3);color:#A6F0FF}
-.test-result.err{background:rgba(255,107,157,.08);border:1px solid rgba(255,107,157,.3);color:#FFB4CB}
-.gear{position:fixed;right:20px;bottom:20px;z-index:150;width:42px;height:42px;border-radius:50%;border:1px solid rgba(255,255,255,.1);background:rgba(12,14,28,.85);color:var(--muted);cursor:pointer;display:grid;place-items:center;font-size:16px;transition:.25s;backdrop-filter:blur(8px);}
-.gear:hover{color:var(--txt);border-color:var(--q-color);transform:rotate(45deg)}
-.quantum-nav{position:fixed;top:0;left:0;right:0;height:72px;z-index:100;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.76);border-bottom:1px solid rgba(255,255,255,.07);backdrop-filter:blur(18px);}
-.quantum-nav-inner{width:min(1180px,calc(100% - 40px));display:flex;align-items:center;justify-content:space-between;}
-.quantum-brand{border:0;background:none;color:#fff;cursor:pointer;font-size:15px;font-weight:700;letter-spacing:.22em;padding:8px 0;}
-.quantum-links{display:flex;align-items:center;gap:8px}
-.quantum-link{border:0;background:transparent;color:rgba(255,255,255,.48);cursor:pointer;padding:10px 17px;border-radius:999px;font:inherit;font-size:13px;letter-spacing:.08em;transition:.25s;text-decoration:none;display:inline-flex;align-items:center;}
-.quantum-link:hover{color:#fff;background:rgba(255,255,255,.06)}
-.quantum-link.active{color:#fff;background:rgba(255,255,255,.09)}
-#screen-home{display:none;max-width:none !important;width:100% !important;min-height:100vh;height:100vh;padding:0 !important;margin:0 !important;position:relative;overflow:hidden;align-items:center;justify-content:center;background:#000 !important;}
-#screen-home.active{display:flex !important;}
-.home-stage{position:relative;width:100%;height:100%;min-height:620px;display:grid;place-items:center;isolation:isolate;overflow:hidden;}
-.quantum-visual{width:min(92vw,82vh,880px);height:min(92vw,82vh,880px);position:relative;display:block;overflow:visible;}
-.quantum-hint{position:absolute;z-index:3;left:50%;top:calc(50% + min(33.12vw,29.52vh,316.8px) + 18px);transform:translateX(-50%);width:max-content;max-width:90vw;text-align:center;color:#ffffff;font-size:clamp(12px,1.55vw,15px);font-weight:400;letter-spacing:.18em;white-space:nowrap;pointer-events:none;animation:quantumHintBreath 15.708s ease-in-out infinite;text-shadow:0 0 16px rgba(255,255,255,.10);}
-@keyframes quantumHintBreath{0%{opacity:.10}25%{opacity:.95}50%{opacity:.10}75%{opacity:0}100%{opacity:.10}}
-@media(max-height:560px){.quantum-hint{top:auto;bottom:5vh}}
-#quantumCanvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair;touch-action:none;-webkit-tap-highlight-color:transparent;}
-.screen:not(#screen-home){padding:112px 22px 90px !important;max-width:1040px !important;min-height:100vh;background:#000;}
-.contact-page{min-height:calc(100vh - 72px);display:grid;place-items:center;text-align:center;}
-.contact-inner{max-width:600px}
-.contact-kicker{color:rgba(255,255,255,.42);font-size:11px;letter-spacing:.28em;text-transform:uppercase;margin-bottom:18px;}
-.contact-title{font-size:clamp(36px,7vw,72px);font-weight:700;letter-spacing:-.04em;color:#fff}
-.contact-text{margin:20px auto 30px;color:rgba(255,255,255,.48);max-width:500px;font-size:15px;line-height:1.9;}
-.contact-mail{display:inline-flex;padding:12px 20px;border:1px solid rgba(255,255,255,.14);border-radius:999px;color:#fff;text-decoration:none;font-size:13px;}
-@media(max-width:700px){
-  .quantum-nav{height:64px}
-  .quantum-nav-inner{width:calc(100% - 24px)}
-  .quantum-brand{font-size:12px}
-  .quantum-links{gap:0}
-  .quantum-link{padding:9px 10px;font-size:11px}
-}
-@media(max-width:600px){
-  .screen{padding:36px 16px 70px}
-  .quiz-card{padding:26px 20px;border-radius:18px}
-  .type-name{font-size:20px}
-  .code{font-size:38px}
-}
+body{background:#000;color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;-webkit-font-smoothing:antialiased;line-height:1.7;overflow-x:hidden;}
+.nav{position:fixed;top:0;left:0;right:0;height:64px;z-index:10;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.78);border-bottom:1px solid rgba(255,255,255,.07);backdrop-filter:blur(18px);}
+.nav-inner{width:min(920px,calc(100% - 32px));display:flex;justify-content:space-between;align-items:center;}
+.brand{color:#fff;font-size:13px;font-weight:700;letter-spacing:.22em;}
+.tag{font-size:11px;color:var(--muted);letter-spacing:.16em;text-transform:uppercase;}
+.wrap{max-width:760px;margin:0 auto;padding:104px 22px 80px;}
+.card{background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.09);border-radius:18px;padding:24px 22px;margin-bottom:16px;}
+.title{font-size:13px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;margin:34px 0 14px;display:flex;align-items:center;gap:12px;}
+.title::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,rgba(255,255,255,.1),transparent);}
+.hero{text-align:center;padding:22px 0;}
+.hero .code{font-size:clamp(34px,8vw,56px);font-weight:800;letter-spacing:.06em;background:linear-gradient(110deg,#fff,var(--q-color));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;line-height:1.1;}
+.hero .name{margin-top:12px;font-size:clamp(18px,4vw,24px);font-weight:800;color:#fff;letter-spacing:.06em;}
+.hero .sub{margin-top:10px;font-size:13.5px;color:var(--muted);}
+.gate{padding:40px 22px;text-align:center;}
+.gate h1{font-size:22px;font-weight:800;color:#fff;margin-bottom:10px;}
+.gate p{font-size:13.5px;color:var(--muted);margin-bottom:26px;line-height:1.8;}
+.gate button{width:100%;max-width:280px;padding:13px;border-radius:12px;border:0;background:var(--q-color);color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;}
+.gate button:disabled{opacity:.5;cursor:not-allowed;}
+
+/* ---- Auth Modal ---- */
+.auth-mask{position:fixed;inset:0;z-index:300;background:rgba(3,4,12,.86);backdrop-filter:blur(10px);display:none;align-items:center;justify-content:center;padding:20px;overflow-y:auto;}
+.auth-mask.show{display:flex;animation:fadeIn .22s ease-out;}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.auth-modal{width:100%;max-width:440px;background:#0B0D1C;border:1px solid rgba(255,255,255,.1);border-radius:22px;padding:32px 28px;position:relative;box-shadow:0 24px 60px rgba(0,0,0,.6);max-height:90vh;overflow-y:auto;animation:slideUp .28s cubic-bezier(.2,.9,.3,1.2);}
+@keyframes slideUp{from{opacity:0;transform:translateY(20px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
+.auth-close{position:absolute;top:16px;right:16px;width:32px;height:32px;border-radius:50%;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);color:rgba(255,255,255,.55);font-size:18px;line-height:1;cursor:pointer;display:grid;place-items:center;font-family:inherit;padding:0;}
+.auth-close:hover{color:#fff;border-color:rgba(255,255,255,.28);}
+.auth-tabs{display:flex;gap:6px;margin-bottom:24px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:4px;}
+.auth-tabs button{flex:1;padding:9px 0;border-radius:9px;border:0;background:transparent;color:rgba(255,255,255,.45);font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;transition:.2s;}
+.auth-tabs button.active{background:var(--q-color);color:#fff;}
+.auth-title{font-size:22px;font-weight:800;color:#fff;margin-bottom:6px;}
+.auth-subtitle{font-size:12.5px;color:var(--muted);margin-bottom:22px;line-height:1.6;}
+.auth-field{margin-bottom:14px;}
+.auth-field label{display:block;font-size:12px;color:var(--muted);margin-bottom:7px;font-weight:500;}
+.auth-field input{width:100%;padding:12px 14px;border-radius:11px;font-size:14px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.035);color:var(--txt);font-family:inherit;outline:none;transition:.2s;}
+.auth-field input:focus{border-color:var(--q-color);}
+.auth-field input.err{border-color:rgba(235,65,75,.7);}
+.auth-field .auth-err{font-size:11.5px;color:#FF8FA0;margin-top:5px;display:none;}
+.auth-field.has-err .auth-err{display:block;}
+.auth-code-row{display:flex;gap:10px;}
+.auth-code-row input{flex:1;min-width:0;}
+.auth-send-code{padding:0 16px;border-radius:11px;border:1px solid rgba(var(--q-r),var(--q-g),var(--q-b),.5);background:rgba(var(--q-r),var(--q-g),var(--q-b),.1);color:var(--q-color);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;transition:.2s;}
+.auth-send-code:hover:not(:disabled){background:rgba(var(--q-r),var(--q-g),var(--q-b),.2);color:#fff;}
+.auth-send-code:disabled{opacity:.45;cursor:not-allowed;border-color:rgba(255,255,255,.1);background:rgba(255,255,255,.03);color:rgba(255,255,255,.4);}
+.auth-submit{width:100%;padding:13px;border-radius:12px;border:0;background:var(--q-color);color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;margin-top:10px;}
+.auth-submit:hover:not(:disabled){filter:brightness(1.08);}
+.auth-submit:disabled{opacity:.55;cursor:not-allowed;}
+.auth-switch{margin-top:16px;text-align:center;font-size:12.5px;color:var(--muted);}
+.auth-switch a{color:var(--q-color);cursor:pointer;font-weight:600;}
+.toast{position:fixed;top:90px;left:50%;transform:translate(-50%,-14px);padding:11px 20px;border-radius:12px;font-size:13.5px;font-weight:600;color:#fff;z-index:400;background:#151A33;border:1px solid rgba(255,255,255,.14);box-shadow:0 12px 32px rgba(0,0,0,.5);pointer-events:none;opacity:0;transition:.28s;max-width:90vw;text-align:center;}
+.toast.show{opacity:1;transform:translate(-50%,0);}
+.toast-ok{border-color:rgba(80,220,140,.5);background:rgba(80,220,140,.14);color:#9EEBB8;}
+.toast-err{border-color:rgba(235,65,75,.5);background:rgba(235,65,75,.14);color:#FFB4BE;}
+.toast-info{border-color:rgba(var(--q-r),var(--q-g),var(--q-b),.5);background:rgba(var(--q-r),var(--q-g),var(--q-b),.14);color:var(--q-color);}
+
+/* ---- App 内部 ---- */
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px;flex-wrap:wrap;}
+.user-chip{display:inline-flex;align-items:center;gap:8px;padding:7px 14px;border-radius:99px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);font-size:13px;color:#fff;}
+.user-chip .avatar{width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,var(--q-color),rgba(var(--q-r),var(--q-g),var(--q-b),.5));display:grid;place-items:center;font-size:11px;font-weight:800;}
+.logout-btn{font-size:12.5px;color:var(--muted);background:none;border:0;cursor:pointer;font-family:inherit;padding:6px 10px;border-radius:6px;}
+.logout-btn:hover{color:#FF8FA0;}
+.add-student-btn{padding:10px 18px;border-radius:11px;border:0;background:var(--q-color);color:#fff;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;}
+.add-student-btn:hover{filter:brightness(1.08);}
+.student-list{display:flex;flex-direction:column;gap:12px;}
+.student-card{padding:18px 20px;border-radius:16px;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.025);cursor:pointer;transition:.2s;}
+.student-card:hover{border-color:rgba(var(--q-r),var(--q-g),var(--q-b),.5);background:rgba(var(--q-r),var(--q-g),var(--q-b),.06);transform:translateY(-1px);}
+.student-card .sc-head{display:flex;align-items:center;gap:12px;}
+.student-card .sc-avatar{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,var(--q-color),rgba(var(--q-r),var(--q-g),var(--q-b),.5));display:grid;place-items:center;font-size:15px;font-weight:800;color:#fff;flex-shrink:0;}
+.student-card .sc-info{flex:1;min-width:0;}
+.student-card .sc-name{font-size:15px;font-weight:700;color:#fff;margin-bottom:2px;}
+.student-card .sc-meta{font-size:11.5px;color:var(--muted);}
+.student-card .sc-badge{font-size:10.5px;padding:4px 10px;border-radius:99px;background:rgba(80,220,140,.14);color:#9EEBB8;border:1px solid rgba(80,220,140,.3);}
+.student-card .sc-badge.empty{background:rgba(255,255,255,.04);color:var(--muted);border-color:rgba(255,255,255,.1);}
+.authenticity{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px;}
+.authenticity .label{font-size:12px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;}
+.authenticity .score{font-size:36px;font-weight:800;line-height:1;}
+.authenticity .score small{font-size:14px;opacity:.55;font-weight:600;}
+.authenticity .level{font-size:13px;font-weight:700;margin-top:6px;}
+.reason{font-size:13.5px;color:#C9CEEE;line-height:1.85;margin-bottom:10px;}
+.advice{padding-top:14px;border-top:1px dashed rgba(255,255,255,.08);font-size:12.5px;color:#A8AEDA;line-height:1.8;}
+.dim-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05);}
+.dim-row:last-child{border-bottom:0;}
+.dim-row .dim-name{width:100px;font-size:13px;color:#fff;font-weight:600;flex-shrink:0;}
+.dim-row .dim-bar{flex:1;display:flex;height:22px;border-radius:8px;overflow:hidden;background:rgba(255,255,255,.04);}
+.dim-row .seg{display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:800;color:#fff;}
+.dim-row .dim-lead{font-size:12px;color:var(--muted);width:44px;text-align:right;flex-shrink:0;}
+.ai-body{font-size:14px;line-height:1.85;color:#C9CEEE;}
+.ai-body h4{font-size:15px;color:#CBBEFF;margin:18px 0 8px;}
+.ai-body p{margin-bottom:12px;}
+.ai-body strong{color:#fff;}
+.ai-body ul{margin:8px 0 14px;padding-left:4px;list-style:none;}
+.ai-body li{position:relative;padding-left:18px;margin-bottom:7px;}
+.ai-body li::before{content:'▸';position:absolute;left:0;color:var(--q-color);}
+.empty-state{text-align:center;padding:50px 20px;color:var(--muted);font-size:14px;line-height:1.8;}
+.back-btn{margin-bottom:20px;display:inline-flex;align-items:center;gap:6px;background:none;border:0;color:var(--muted);font-size:13px;cursor:pointer;font-family:inherit;padding:6px 0;}
+.back-btn:hover{color:#fff;}
+#reader-container{width:100%;max-width:400px;margin:0 auto 16px;border-radius:12px;overflow:hidden;background:#000;display:none;}
+#reader{width:100%;border:none !important;}
+.scan-btn{width:100%;padding:12px;border-radius:11px;border:1px dashed var(--q-color);background:rgba(var(--q-r),var(--q-g),var(--q-b),.08);color:var(--q-color);font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;margin-bottom:16px;display:flex;align-items:center;justify-content:center;gap:8px;transition:.2s;}
+.scan-btn:hover{background:rgba(var(--q-r),var(--q-g),var(--q-b),.15);}
 </style>
 </head>
 <body>
 
-<nav class="quantum-nav">
-  <div class="quantum-nav-inner">
-    <button class="quantum-brand nav-go" data-target="screen-home">QUANTUM</button>
-    <div class="quantum-links">
-      <button class="quantum-link nav-go active" data-target="screen-home">主页</button>
-      <button class="quantum-link nav-go" data-target="screen-intro">QBTI</button>
-      <button class="quantum-link nav-go" data-target="screen-contact">联系我们</button>
-      <a class="quantum-link" href="/parent">家长端 →</a>
-    </div>
+<nav class="nav">
+  <div class="nav-inner">
+    <div class="brand">QUANTUM · 家长端</div>
+    <div class="tag" id="navTag"></div>
   </div>
 </nav>
 
-<div class="app">
-  <section class="screen active" id="screen-home">
-    <div class="home-stage">
-      <div class="quantum-visual" id="quantumVisual">
-        <canvas id="quantumCanvas"></canvas>
-      </div>
-      <div class="quantum-hint" aria-hidden="true">按住量子球以开始</div>
-    </div>
-  </section>
-
-  <section class="screen" id="screen-intro">
-    <div class="hero">
-      <div class="badge">QBTI · Quantum Behavior Type Indicator</div>
-      <h1>你，<span class="grad">尚未坍缩</span>。</h1>
-      <p class="lead">
-        在单一的评价框架里，每一次排名、每一张试卷，都是一次强观测。
-        而观测，会让叠加态坍缩。<br>
-        QBTI 用 40 道题、81 种人格类型、4 个发展方向，描述那些还没被观测到的你。
-      </p>
-      <div class="hero-actions">
-        <button class="btn primary" id="btnStart">开始观测 →</button>
-      </div>
-      <div class="dim-preview" id="dimPreview"></div>
-    </div>
-  </section>
-
-  <section class="screen" id="screen-quiz">
-    <div class="quiz-head">
-      <div class="progress-track"><div class="progress-fill" id="progFill"></div></div>
-      <div class="progress-text"><b id="qIdx">1</b> / <span id="qTotal">40</span></div>
-    </div>
-    <div class="group-strip" id="groupStrip"></div>
-    <div class="quiz-card" id="quizCard">
-      <h2 class="q-text" id="qText">加载中…</h2>
-      <div class="options" id="options"></div>
-    </div>
-    <div class="quiz-foot">
-      <button class="btn sm" id="btnPrev" disabled>← 上一题</button>
-      <span class="hint">键盘 1–5 可快速作答</span>
-    </div>
-  </section>
-
-  <section class="screen" id="screen-result">
-    <div class="result-hero">
-      <div class="r-label">Your Quantum Learning Type</div>
-      <div class="type-portrait"><img id="rTypeImage" src="" alt="人格画像"></div>
-      <div class="code" id="rCode">—</div>
-      <div class="type-name" id="rTypeName">—</div>
-      <p class="r-tagline" id="rTagline"></p>
-    </div>
-    <div class="section-title">四维倾向 · 每维度内三字母合计 100%</div>
-    <div class="dim-stacks" id="dimStacks"></div>
-    <div class="section-title">发展向量 Developmental Vector</div>
-    <div class="vector-section">
-      <div class="vector-head">
-        <div class="vector-title">你当前的学习状态更倾向于……</div>
-        <div class="vector-sub">四条发展路径的相对权重。</div>
-      </div>
-      <div class="vector-grid" id="vectorGrid"></div>
-    </div>
-    <div class="section-title">AI 引导报告 · 面向家长</div>
-    <div class="ai-panel">
-      <div class="ai-head">
-        <h3>个性化波函数解读</h3>
-        <button class="btn sm" id="btnAI">生成报告</button>
-      </div>
-      <div class="ai-body" id="aiBody">
-        <div class="ai-empty">点击「生成报告」，AI 将基于孩子的十二维量子态与作答真实性，输出一份面向家长的引导路径。</div>
-      </div>
-    </div>
-    <div class="result-actions">
-      <button class="btn" id="btnRestart">重新观测</button>
-      <button class="btn" id="btnCopy">复制结果</button>
-    </div>
-  </section>
-
-  <section class="screen" id="screen-contact">
-    <div class="contact-page">
-      <div class="contact-inner">
-        <div class="contact-kicker">CONTACT</div>
-        <h1 class="contact-title">联系我们</h1>
-        <p class="contact-text">如果你希望了解项目、提出建议，或者参与后续的量子态映射研究，可以通过邮件与我们联系。</p>
-        <a class="contact-mail" href="mailto:contact@example.com">contact@example.com</a>
-      </div>
-    </div>
-  </section>
-</div>
-
-<button class="gear" id="btnGear" title="API 设置">⚙</button>
-
-<div class="modal-mask" id="modalMask">
-  <div class="modal">
-    <h3>API 设置</h3>
-    <p class="sub">密钥仅保存在本地浏览器（localStorage），不会上传到任何第三方。</p>
-    <div class="field"><label>接口地址</label><input id="inpUrl" type="text" placeholder="https://api.deepseek.com/chat/completions"></div>
-    <div class="field"><label>API Key</label><input id="inpKey" type="password" placeholder="sk-..."></div>
-    <div class="field"><label>模型名称</label><input id="inpModel" type="text" placeholder="deepseek-chat"></div>
-    <button class="btn sm" id="btnTestCfg" style="width:100%">测试连接</button>
-    <div class="test-result" id="testResult"></div>
-    <div class="modal-actions">
-      <button class="btn sm ghost" id="btnCancelCfg">取消</button>
-      <button class="btn sm primary" id="btnSaveCfg">保存</button>
-    </div>
-  </div>
-</div>
-
-<script>
-(function(){
-  function bindNav(){
-    var buttons = document.querySelectorAll('.nav-go');
-    if(buttons.length === 0) return;
-    buttons.forEach(function(btn){
-      if(btn._navBound) return;
-      btn._navBound = true;
-      btn.addEventListener('click', function(){
-        var id = btn.dataset.target;
-        document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('active'); });
-        var target = document.getElementById(id);
-        if(target) target.classList.add('active');
-        document.querySelectorAll('.quantum-link').forEach(function(b){
-          b.classList.toggle('active', b.dataset.target === id);
-        });
-        window.scrollTo({top: 0, behavior: 'smooth'});
-        if(id === 'screen-home' && window.QuantumSphere){
-          setTimeout(function(){ window.QuantumSphere.resize(); }, 50);
-          setTimeout(function(){ window.QuantumSphere.resize(); }, 200);
-          setTimeout(function(){ window.QuantumSphere.resize(); }, 500);
-        }
-      });
-    });
-    console.log('[Nav] 导航已绑定，共 ' + buttons.length + ' 个按钮');
-  }
-  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindNav);
-  else bindNav();
-})();
-</script>
+<div class="wrap" id="app"></div>
 
 <script src="qbti-core.js"></script>
-<script src="quantum-sphere.js"></script>
-<script src="qbti-auth.js"></script>
-
-<script>
-(function(){
-  'use strict';
-  const Q = window.QBTI;
-  const $ = id => document.getElementById(id);
-  if(!Q){ console.error('[QBTI] qbti-core.js 未加载'); return; }
-
-  const state = {
-    idx: 0,
-    answers: {},
-    timings: {},
-    questionShownAt: {},
-    validity: null,
-    locked: false,
-    result: null,
-    quantumState: null,
-    dimStates: null,
-    aiReportText: null,
-    restoredTs: null
-  };
-  const CFG_KEY = 'qbti_config_v2';
-  const RESULT_KEY_PREFIX = 'qbti_results_';
-  const DEFAULT_CFG = {
-    url: 'https://api.deepseek.com/chat/completions',
-    key: '',
-    model: 'deepseek-chat'
-  };
-
-  function formatTime(ts){
-    const d = new Date(ts);
-    const pad = n => n < 10 ? '0'+n : ''+n;
-    return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) +
-      ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
-  }
-
-  (function(){
-    const el = $('dimPreview');
-    if(!el) return;
-    el.innerHTML = Q.DIMS.map((d, i) =>
-      '<div class="pv-card">'
-      + '<div class="pv-idx">0' + (i+1) + '</div>'
-      + '<div class="pv-name">' + d.name + '</div>'
-      + '<div class="pv-en">' + d.en + '</div>'
-      + '<div class="pv-tags">' + d.letters.map(l => {
-        const s = Q.SUBDIMS.find(x => x.id === l);
-        return '<span class="pv-tag" style="background:' + Q.DIM_COLORS[d.id][l] + '22;color:' + Q.DIM_COLORS[d.id][l] + '">' + l + ' · ' + s.name + '</span>';
-      }).join('') + '</div></div>'
-    ).join('');
-  })();
-
-  /* ---------- 报告同步到后端 ---------- */
-  async function syncReportToServer(){
-    if(!window.QAuth || !window.QAuth.isLoggedIn()) return;
-    const u = window.QAuth.getCurrentUser();
-    if(!u || !u.email || !state.result) return;
-
-    const payload = {
-      code: state.result.letters.join('') + '-' + state.result.suffix.letter,
-      baseCode: state.result.letters.join(''),
-      suffixLetter: state.result.suffix.letter,
-      suffixName: state.result.suffix.name,
-      typeName: Q.TYPE_NAMES[state.result.letters.join('')] || '',
-      dimGroupRatio: state.result.dimGroupRatio,
-      dimLeadInfo: state.result.dimLeadInfo,
-      suffixRatio: state.result.suffixRatio,
-      suffixGap: state.result.suffixGap,
-      quantumState: state.quantumState ? state.quantumState.type : null,
-      dimStates: state.dimStates ? state.dimStates.types : null,
-      validity: state.validity || null,
-      aiReport: state.aiReportText || null,
-      fullResult: state.result // 👈 关键：包含完整计算结果
-    };
-
-    try {
-      const res = await fetch('/api/report/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          studentEmail: u.email,
-          studentUsername: u.username,
-          payload
-        })
-      });
-      if(res.ok) console.log('[QBTI] 报告已同步到服务器');
-    } catch(e){
-      console.warn('[QBTI] 报告同步失败', e);
-    }
-  }
-
-  /* ---------- 历史记录 ---------- */
-  function saveResultToUser(result, qs, ds, answers){
-    if(!window.QAuth || !window.QAuth.isLoggedIn()) return;
-    const u = window.QAuth.getCurrentUser();
-    if(!u || !u.email) return;
-    const key = RESULT_KEY_PREFIX + u.email;
-    let history = [];
-    try {
-      history = JSON.parse(localStorage.getItem(key) || '[]');
-      if(!Array.isArray(history)) history = [];
-    } catch(e){ history = []; }
-    history.push({
-      ts: Date.now(),
-      answers: Object.assign({}, answers),
-      timings: state.timings ? Object.assign({}, state.timings) : {},
-      code: result.letters.join(''),
-      suffix: result.suffix.letter,
-      quantumState: qs ? qs.type : null,
-      dimStates: ds
-    });
-    if(history.length > 10) history = history.slice(-10);
-    try { localStorage.setItem(key, JSON.stringify(history)); } catch(e){}
-  }
-
-  function getLatestResultFromUser(){
-    if(!window.QAuth || !window.QAuth.isLoggedIn()) return null;
-    const u = window.QAuth.getCurrentUser();
-    if(!u || !u.email) return null;
-    const key = RESULT_KEY_PREFIX + u.email;
-    let history = [];
-    try {
-      history = JSON.parse(localStorage.getItem(key) || '[]');
-      if(!Array.isArray(history)) history = [];
-    } catch(e){ history = []; }
-    if(history.length === 0) return null;
-    return history[history.length - 1];
-  }
-
-  function applyQuantumStateToSphere(qs, ds){
-    if(!window.QuantumSphere) return;
-    if(qs && window.QuantumSphere.setQuantumState) window.QuantumSphere.setQuantumState(qs.type);
-    if(ds && window.QuantumSphere.setDimensionStates) window.QuantumSphere.setDimensionStates(ds);
-  }
-
-  function restoreFromHistory(entry){
-    if(!entry || !entry.answers) return false;
-    state.answers = Object.assign({}, entry.answers);
-    state.timings = entry.timings ? Object.assign({}, entry.timings) : {};
-    state.questionShownAt = {};
-    state.result = Q.computeResult(state.answers);
-    state.restoredTs = entry.ts || null;
-    state.validity = Q.analyzeResponseValidity(state.answers, state.timings);
-
-    let qs = null, ds = null;
-    if(Q.analyzeQuantumState){
-      qs = Q.analyzeQuantumState(state.result);
-      state.quantumState = qs;
-    }
-    if(Q.analyzeDimensionStates){
-      const raw = Q.analyzeDimensionStates(state.result);
-      ds = { PO: raw.PO.type, II: raw.II.type, LA: raw.LA.type, UR: raw.UR.type };
-      state.dimStates = { raw: raw, types: ds };
-    }
-    applyQuantumStateToSphere(qs, ds);
-    renderResult(state.result, state.restoredTs);
-    renderQuantumStateBadge(qs, ds);
-    return true;
-  }
-
-  function updateRestoreBanner(){
-    const existing = document.getElementById('restoreBanner');
-    if(existing) existing.remove();
-    if(!window.QAuth || !window.QAuth.isLoggedIn()) return;
-    const latest = getLatestResultFromUser();
-    if(!latest) return;
-    const hero = document.querySelector('#screen-intro .hero');
-    if(!hero) return;
-
-    const u = window.QAuth.getCurrentUser();
-    const typeName = Q.TYPE_NAMES[latest.code] || '';
-    const banner = document.createElement('div');
-    banner.id = 'restoreBanner';
-    banner.style.cssText = [
-      'margin:0 0 26px;padding:16px 20px;border-radius:14px;',
-      'border:1px solid rgba(var(--q-r),var(--q-g),var(--q-b),.35);',
-      'background:rgba(var(--q-r),var(--q-g),var(--q-b),.08);',
-      'display:flex;align-items:center;gap:14px;flex-wrap:wrap;'
-    ].join('');
-    banner.innerHTML =
-      '<div style="flex:1;min-width:200px;">'
-      + '<div style="font-size:11px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;margin-bottom:4px;">'
-      + '欢迎回来，' + Q.escapeHTML(u.username) + '</div>'
-      + '<div style="font-size:14.5px;color:#fff;font-weight:700;">'
-      + '上次测评：' + latest.code + '-' + latest.suffix
-      + (typeName ? ' · ' + typeName : '') + '</div>'
-      + '<div style="font-size:12px;color:var(--muted);margin-top:3px;">'
-      + formatTime(latest.ts) + '</div>'
-      + '</div>'
-      + '<button id="btnViewHistory" class="btn sm primary" type="button">查看上次结果</button>';
-
-    hero.insertBefore(banner, hero.firstChild);
-    document.getElementById('btnViewHistory').addEventListener('click', () => {
-      restoreFromHistory(latest);
-      const target = document.getElementById('screen-result');
-      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-      if(target) target.classList.add('active');
-      window.scrollTo({top: 0, behavior: 'smooth'});
-    });
-  }
-
-  /* ---------- 测验 ---------- */
-  $('qTotal').textContent = Q.QUESTIONS.length;
-
-  function renderGroupStrip(){
-    const cur = Q.QUESTIONS[state.idx].group;
-    const labels = ['潜能开放度','内在驱动力','学习自主性','未知应对方式'];
-    $('groupStrip').innerHTML = [1,2,3,4].map(g => {
-      let cls = 'group-dot';
-      if(g < cur) cls += ' done'; else if(g === cur) cls += ' active';
-      return '<span class="' + cls + '"><span class="gd-num">0' + g + '</span> ' + labels[g-1] + '</span>';
-    }).join('');
-  }
-
-  function renderQuestion(){
-    const q = Q.QUESTIONS[state.idx];
-    if(!state.questionShownAt[q.id]) state.questionShownAt[q.id] = Date.now();
-    $('qText').textContent = q.text;
-    $('qIdx').textContent = state.idx + 1;
-    $('progFill').style.width = (state.idx / Q.QUESTIONS.length * 100) + '%';
-    renderGroupStrip();
-    $('options').innerHTML = Q.OPTIONS.map((o, i) =>
-      '<button class="opt" data-v="' + o.v + '"><span class="num">' + (i+1) + '</span><span class="dot"></span><span>' + o.t + '</span></button>'
-    ).join('');
-    const chosen = state.answers[q.id];
-    if(chosen != null){
-      const el = $('options').querySelector('[data-v="' + chosen + '"]');
-      if(el) el.classList.add('selected');
-    }
-    $('btnPrev').disabled = state.idx === 0;
-  }
-
-  $('options').addEventListener('click', e => {
-    const btn = e.target.closest('.opt');
-    if(!btn) return;
-    answer(parseInt(btn.dataset.v, 10));
-  });
-
-  function answer(val){
-    if(state.locked) return;
-    state.locked = true;
-    const q = Q.QUESTIONS[state.idx];
-    state.answers[q.id] = val;
-    if(state.timings[q.id] == null && state.questionShownAt[q.id]){
-      state.timings[q.id] = Math.max(0.1, (Date.now() - state.questionShownAt[q.id]) / 1000);
-    }
-    $('options').querySelectorAll('.opt').forEach(el => el.classList.remove('selected'));
-    const sel = $('options').querySelector('[data-v="' + val + '"]');
-    if(sel) sel.classList.add('selected');
-    setTimeout(() => {
-      state.locked = false;
-      state.idx++;
-      if(state.idx >= Q.QUESTIONS.length) finish();
-      else renderQuestion();
-    }, 240);
-  }
-
-  $('btnPrev').addEventListener('click', () => {
-    if(state.idx === 0 || state.locked) return;
-    state.idx--;
-    renderQuestion();
-  });
-
-  document.addEventListener('keydown', e => {
-    if(!$('screen-quiz').classList.contains('active')) return;
-    const n = parseInt(e.key, 10);
-    if(n >= 1 && n <= 5){ e.preventDefault(); answer(n); }
-    if(e.key === 'Backspace' && state.idx > 0){ e.preventDefault(); state.idx--; renderQuestion(); }
-  });
-
-  const STABILITY_LABEL = {
-    clear:    {text:'明确',       cls:'clear'},
-    moderate: {text:'中等',       cls:'moderate'},
-    weak:     {text:'尚未坍缩',   cls:'weak'}
-  };
-
-  function finish(){
-    state.result = Q.computeResult(state.answers);
-    state.restoredTs = null;
-    state.aiReportText = null;
-    state.validity = Q.analyzeResponseValidity(state.answers, state.timings);
-    console.log('[QBTI] 真实度：' + state.validity.authenticity + ' 分（' + state.validity.levelText + '）',
-                '| 疑点：', state.validity.flags);
-
-    let qs = null, ds = null;
-    if(Q.analyzeQuantumState){
-      qs = Q.analyzeQuantumState(state.result);
-      state.quantumState = qs;
-    }
-    if(Q.analyzeDimensionStates){
-      const raw = Q.analyzeDimensionStates(state.result);
-      ds = { PO: raw.PO.type, II: raw.II.type, LA: raw.LA.type, UR: raw.UR.type };
-      state.dimStates = { raw: raw, types: ds };
-    }
-    applyQuantumStateToSphere(qs, ds);
-    saveResultToUser(state.result, qs, ds, state.answers);
-    renderResult(state.result, null);
-    renderQuantumStateBadge(qs, ds);
-
-    // 自动同步到服务器
-    syncReportToServer();
-
-    const target = document.getElementById('screen-result');
-    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-    if(target) target.classList.add('active');
-    window.scrollTo({top: 0, behavior: 'smooth'});
-  }
-
-  function renderQuantumStateBadge(qs, dimStates){
-    if(!qs) return;
-    const labels = {
-      good:          { text: '良好量子态', color: '#50DC8C' },
-      danger:        { text: '危险量子态', color: '#EB414B' },
-      superposition: { text: '叠加量子态', color: '#5A8CF5' }
-    };
-    const info = labels[qs.type];
-    if(!info) return;
-    const old = document.getElementById('quantumStateBadge');
-    if(old) old.remove();
-
-    const wrap = document.createElement('div');
-    wrap.id = 'quantumStateBadge';
-    wrap.style.cssText = 'margin:20px auto 0;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px;';
-    const total = document.createElement('div');
-    total.style.cssText = 'display:inline-flex;align-items:center;gap:8px;padding:8px 18px;border-radius:99px;font-size:13.5px;font-weight:700;letter-spacing:.06em;border:1px solid ' + info.color + '44;background:' + info.color + '14;color:' + info.color + ';';
-    total.innerHTML = '<span style="text-shadow:0 0 8px ' + info.color + '">●</span>整体 · ' + info.text
-      + '<span style="opacity:.55;font-weight:400;font-size:11.5px;margin-left:4px">主页大球已变色</span>';
-    wrap.appendChild(total);
-
-    if(dimStates){
-      const dimRow = document.createElement('div');
-      dimRow.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;justify-content:center;';
-      const dimNames = { PO:'潜能开放度', II:'内在驱动力', LA:'学习自主性', UR:'未知应对方式' };
-      ['PO','II','LA','UR'].forEach(id => {
-        const t = dimStates[id];
-        const meta = labels[t];
-        if(!meta) return;
-        const chip = document.createElement('span');
-        chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:99px;font-size:11.5px;font-weight:600;border:1px solid ' + meta.color + '44;background:' + meta.color + '12;color:' + meta.color + ';';
-        chip.innerHTML = '<span style="font-size:9px">●</span>' + dimNames[id] + ' · ' + meta.text;
-        dimRow.appendChild(chip);
-      });
-      wrap.appendChild(dimRow);
-    }
-    const hero = document.querySelector('.result-hero');
-    if(hero) hero.appendChild(wrap);
-  }
-
-  function renderValidityCard(v){
-    const old = document.getElementById('validityCard');
-    if(old) old.remove();
-    if(!v) return;
-    const colorMap = { high:'#50DC8C', medium:'#FFD98A', low:'#FF8A48', very_low:'#EB414B' };
-    const c = colorMap[v.level] || '#8B90B8';
-    const card = document.createElement('div');
-    card.id = 'validityCard';
-    card.style.cssText = [
-      'margin:24px auto 0;padding:22px 24px;border-radius:18px;',
-      'border:1px solid ' + c + '55;background:' + c + '0F;',
-      'max-width:720px;text-align:left;'
-    ].join('');
-    const reasonsHTML = (v.parentReasons && v.parentReasons.length > 0)
-      ? v.parentReasons.map(r => '▸ ' + Q.escapeHTML(r)).join('<br>')
-      : '▸ 未发现明显疑点，作答状态自然';
-    const timeLine = (v.totalTime != null && v.avgTime != null)
-      ? ('作答用时约 ' + Math.round(v.totalTime) + ' 秒 · 平均每题 ' + v.avgTime.toFixed(1) + ' 秒') : '';
-    card.innerHTML =
-      '<div style="display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:12px;">'
-      + '<div style="font-size:12px;letter-spacing:.18em;color:#8B90B8;text-transform:uppercase;">Response Authenticity · 作答真实度</div>'
-      + '<div style="font-size:26px;font-weight:800;color:' + c + ';line-height:1;">'
-      + v.authenticity + '<span style="font-size:14px;opacity:.55;font-weight:600;"> / 100</span>'
-      + '</div></div>'
-      + '<div style="font-size:13px;color:' + c + ';font-weight:700;margin-bottom:8px;">'
-      + '● ' + Q.escapeHTML(v.levelText)
-      + (timeLine ? ' <span style="font-weight:400;opacity:.7;margin-left:8px;font-size:12px;">' + Q.escapeHTML(timeLine) + '</span>' : '')
-      + '</div>'
-      + '<div style="font-size:13px;color:#C9CEEE;line-height:1.75;">' + reasonsHTML + '</div>'
-      + '<div style="margin-top:12px;padding-top:12px;border-top:1px dashed rgba(255,255,255,.08);font-size:12.5px;color:#A8AEDA;line-height:1.7;">'
-      + '给家长的建议：' + Q.escapeHTML(v.advice)
-      + '</div>';
-    const hero = document.querySelector('.result-hero');
-    if(hero) hero.appendChild(card);
-  }
-
-  function renderResult(res, restoredTs){
-    const baseCode = res.letters.join('');
-    const typeName = Q.TYPE_NAMES[baseCode] || '未知类型';
-    const portrait = $('rTypeImage');
-    if(portrait){ portrait.src = Q.makeTypeImage(baseCode); portrait.alt = baseCode + ' · ' + typeName; }
-    $('rCode').innerHTML = baseCode + '<span class="code-suffix">-' + res.suffix.letter + '</span>';
-    $('rTypeName').innerHTML = typeName + ' <span class="tn-suffix">· ' + res.suffix.name + '</span>';
-    const sufStab = STABILITY_LABEL[res.suffixStability];
-    $('rTagline').innerHTML = '你当前的发展方向为「<strong style="color:#C6CBF5">' + res.suffix.name + '</strong>」——' + res.suffix.desc + '<br><span style="opacity:.75;font-size:13px">主导差值 ' + res.suffixGap + '% · ' + sufStab.text + '</span>';
-
-    $('dimStacks').innerHTML = Q.DIMS.map(d => {
-      const ratios = res.dimGroupRatio[d.id];
-      const info = res.dimLeadInfo[d.id];
-      const colors = Q.DIM_COLORS[d.id];
-      const stab = STABILITY_LABEL[info.stability];
-      const segments = d.letters.map(l => {
-        const pct = ratios[l]; const color = colors[l];
-        let sc = '';
-        if(pct < 8) sc = 'tiny'; else if(pct < 14) sc = 'small';
-        return '<div class="dsc-seg ' + sc + '" style="width:0%;background:' + color + ';" data-w="' + pct + '"><span class="dsc-seg-letter">' + l + '</span><span class="dsc-seg-pct">' + pct + '%</span></div>';
-      }).join('');
-      const legend = d.letters.map(l => {
-        const s = Q.SUBDIMS.find(x => x.id === l);
-        const isLead = l === info.lead;
-        return '<span class="dsc-leg ' + (isLead?'lead':'') + '"><span class="dsc-dot" style="background:' + colors[l] + '"></span><span class="dsc-leg-name">' + l + ' ' + s.name + '</span></span>';
-      }).join('');
-      return '<div class="dim-stack-card"><div class="dsc-head"><div><div class="dsc-title">' + d.name + '</div><div class="dsc-en">' + d.en + '</div></div><div class="dsc-lead">主导 <span class="dsc-lead-letter" style="background:' + colors[info.lead] + ';">' + info.lead + '</span><span class="dsc-gap ' + stab.cls + '">差值 ' + info.gap + '% · ' + stab.text + '</span></div></div><div class="dsc-bar">' + segments + '</div><div class="dsc-legend">' + legend + '</div></div>';
-    }).join('');
-
-    const maxSuf = Math.max.apply(null, Q.SUFFIXES.map(sf => res.suffixRatio[sf.letter]));
-    $('vectorGrid').innerHTML = Q.SUFFIXES.map(sf => {
-      const pct = res.suffixRatio[sf.letter];
-      const isTop = pct === maxSuf;
-      return '<div class="vector-card ' + (isTop?'top':'') + '"><div class="vc-letter">' + sf.letter + '</div><div class="vc-name">' + sf.name + '</div><div class="vc-en">' + sf.name + '</div><div class="vc-pct">' + pct + '%</div><div class="vc-bar"><div class="vc-fill" data-w="' + pct + '"></div></div><div class="vc-desc">' + sf.desc + '</div></div>';
-    }).join('');
-
-    const oldTip = document.getElementById('restoredTip');
-    if(oldTip) oldTip.remove();
-    if(restoredTs){
-      const tip = document.createElement('div');
-      tip.id = 'restoredTip';
-      tip.style.cssText = 'margin:18px auto 0;padding:10px 18px;border-radius:99px;font-size:12.5px;display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:var(--muted);';
-      tip.innerHTML = '⏱ 上次测评时间：' + formatTime(restoredTs) + ' · 点击下方「重新观测」可重新测试';
-      const hero = document.querySelector('.result-hero');
-      if(hero) hero.appendChild(tip);
-    }
-
-    renderValidityCard(state.validity);
-
-    requestAnimationFrame(() => {
-      document.querySelectorAll('.dsc-seg').forEach((el, i) => setTimeout(() => { el.style.width = el.dataset.w + '%'; }, 60 + i*40));
-      document.querySelectorAll('.vc-fill').forEach((el, i) => setTimeout(() => { el.style.width = el.dataset.w + '%'; }, 320 + i*80));
-    });
-
-    $('aiBody').innerHTML = '<div class="ai-empty">点击「生成报告」，AI 将基于孩子的十二维量子态与作答真实性，输出一份面向家长的引导路径。</div>';
-    $('btnAI').disabled = false;
-    $('btnAI').textContent = '生成报告';
-  }
-
-  /* ---------- AI ---------- */
-  function getCfg(){
-    const cfg = Object.assign({}, DEFAULT_CFG);
-    try {
-      const raw = localStorage.getItem(CFG_KEY);
-      if(raw){
-        const s = JSON.parse(raw) || {};
-        if(s.url && s.url.trim()) cfg.url = s.url.trim();
-        if(s.key && s.key.trim()) cfg.key = s.key.trim();
-        if(s.model && s.model.trim()) cfg.model = s.model.trim();
-      }
-    } catch(e){}
-    return cfg;
-  }
-  function saveCfg(cfg){ localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
-
-  async function callAPI(prompt){
-    const cfg = getCfg();
-    if(!cfg.key) throw new Error('未配置 API Key，请点击右下角 ⚙ 配置');
-    let res;
-    try {
-      res = await fetch(cfg.url, {
-        method: 'POST',
-        headers: {'Content-Type':'application/json','Authorization':'Bearer ' + cfg.key},
-        body: JSON.stringify({
-          model: cfg.model,
-          messages: [
-            {role: 'system', content: '你是一位擅长用隐喻理解青少年学习状态的教育引导顾问，语气温暖、具体、不评判。你的报告面向家长，帮助家长理解孩子，而不是评判孩子。'},
-            {role: 'user', content: prompt}
-          ],
-          temperature: 0.85,
-          max_tokens: 2400,
-          stream: false
-        })
-      });
-    } catch(e){ throw new Error('CORS_OR_NETWORK'); }
-    if(!res.ok){
-      const t = await res.text().catch(() => '');
-      throw new Error('API ' + res.status + ' · ' + t.slice(0,180));
-    }
-    const data = await res.json();
-    const content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-    if(!content) throw new Error('API 返回内容为空');
-    return content;
-  }
-
-  $('btnAI').addEventListener('click', async () => {
-    if(!state.result) return;
-    const btn = $('btnAI');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span>生成中…';
-    $('aiBody').innerHTML = '<div class="ai-empty"><span class="spinner"></span>正在解析孩子的波函数与作答真实性…</div>';
-
-    const validity = state.validity || Q.analyzeResponseValidity(state.answers, state.timings);
-    state.validity = validity;
-
-    try {
-      const text = await callAPI(Q.buildPrompt(state.result, validity));
-      state.aiReportText = text;
-      $('aiBody').innerHTML = Q.renderMD(text);
-      syncReportToServer();
-    } catch(err){
-      const msg = String(err.message || err);
-      let extra = '';
-      if(msg.indexOf('CORS_OR_NETWORK') >= 0){
-        extra = '<br><br><span style="color:#FFD98A">⚠ 浏览器跨域限制。用本地服务器打开或换允许 CORS 的代理地址。下方已切换本地报告。</span>';
-      }
-      $('aiBody').innerHTML =
-        '<div class="ai-empty" style="color:#FF9BB5">AI 调用失败：'
-        + Q.escapeHTML(msg.split('CORS_OR_NETWORK:').pop().trim())
-        + extra + '</div>'
-        + Q.renderMD(Q.localReport(state.result, validity));
-      state.aiReportText = Q.localReport(state.result, validity);
-      syncReportToServer();
-    } finally {
-      btn.disabled = false;
-      btn.textContent = '重新生成';
-    }
-  });
-
-  /* ---------- 按钮 ---------- */
-  $('btnStart').addEventListener('click', () => {
-    state.idx = 0;
-    state.answers = {};
-    state.timings = {};
-    state.questionShownAt = {};
-    state.validity = null;
-    state.result = null;
-    state.aiReportText = null;
-    state.restoredTs = null;
-    state.locked = false;
-    renderQuestion();
-    const target = document.getElementById('screen-quiz');
-    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-    if(target) target.classList.add('active');
-    window.scrollTo({top: 0, behavior: 'smooth'});
-  });
-
-  $('btnRestart').addEventListener('click', () => {
-    state.idx = 0;
-    state.answers = {};
-    state.timings = {};
-    state.questionShownAt = {};
-    state.validity = null;
-    state.result = null;
-    state.aiReportText = null;
-    state.restoredTs = null;
-    state.locked = false;
-    updateRestoreBanner();
-    const target = document.getElementById('screen-intro');
-    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-    if(target) target.classList.add('active');
-    window.scrollTo({top: 0, behavior: 'smooth'});
-  });
-
-  $('btnCopy').addEventListener('click', async () => {
-    if(!state.result) return;
-    const res = state.result;
-    const baseCode = res.letters.join('');
-    const typeName = Q.TYPE_NAMES[baseCode] || '';
-    const fullCode = baseCode + '-' + res.suffix.letter;
-    const dimLines = Q.DIMS.map(d => {
-      const r = res.dimGroupRatio[d.id]; const info = res.dimLeadInfo[d.id];
-      return d.name + '：' + d.letters.map(l => l + '=' + r[l] + '%').join(' / ') + ' → 主导 ' + info.lead + '（差值 ' + info.gap + '%）';
-    }).join('\n');
-    const vecLines = Q.SUFFIXES.map(sf => sf.letter + ' ' + sf.name + '：' + res.suffixRatio[sf.letter] + '%').join('\n');
-    let validityLines = '';
-    if(state.validity){
-      const v = state.validity;
-      validityLines = '\n\n作答真实度：' + v.authenticity + ' / 100（' + v.levelText + '）\n评分依据：\n'
-        + (v.parentReasons.length > 0 ? v.parentReasons.map(r => '▸ ' + r).join('\n') : '▸ 未发现明显疑点')
-        + '\n给家长的建议：' + v.advice;
-    }
-    const txt = 'QBTI 量子人格测评结果（面向家长）\n'
-      + '类型：' + fullCode + ' · ' + typeName + '（' + res.suffix.name + '）\n'
-      + '发展方向：' + res.suffix.desc + '\n\n'
-      + '四大维度倾向：\n' + dimLines + '\n\n'
-      + '四个发展向量占比：\n' + vecLines + validityLines;
-    try {
-      await navigator.clipboard.writeText(txt);
-      const b = $('btnCopy');
-      b.textContent = '已复制 ✓';
-      setTimeout(() => b.textContent = '复制结果', 1800);
-    } catch(e){ alert('复制失败'); }
-  });
-
-  /* ---------- API 设置 ---------- */
-  $('btnGear').addEventListener('click', () => {
-    const cfg = getCfg();
-    $('inpUrl').value = cfg.url;
-    $('inpKey').value = cfg.key;
-    $('inpModel').value = cfg.model;
-    $('testResult').className = 'test-result';
-    $('modalMask').classList.add('show');
-  });
-  $('btnCancelCfg').addEventListener('click', () => $('modalMask').classList.remove('show'));
-  $('modalMask').addEventListener('click', e => { if(e.target === $('modalMask')) $('modalMask').classList.remove('show'); });
-  $('btnSaveCfg').addEventListener('click', () => {
-    saveCfg({
-      url: $('inpUrl').value.trim() || DEFAULT_CFG.url,
-      key: $('inpKey').value.trim(),
-      model: $('inpModel').value.trim() || DEFAULT_CFG.model
-    });
-    $('modalMask').classList.remove('show');
-    const b = $('btnSaveCfg');
-    b.textContent = '已保存 ✓';
-    setTimeout(() => b.textContent = '保存', 1500);
-  });
-  $('btnTestCfg').addEventListener('click', async () => {
-    const tr = $('testResult');
-    tr.className = 'test-result show';
-    tr.textContent = '正在测试…';
-    tr.style.color = '#A8AEDA';
-    const url = $('inpUrl').value.trim() || DEFAULT_CFG.url;
-    const key = $('inpKey').value.trim() || DEFAULT_CFG.key;
-    const model = $('inpModel').value.trim() || DEFAULT_CFG.model;
-    try {
-      const r = await fetch(url, {
-        method: 'POST',
-        headers: {'Content-Type':'application/json','Authorization':'Bearer ' + key},
-        body: JSON.stringify({model, messages:[{role:'user',content:'ping'}], max_tokens:5, stream:false})
-      });
-      if(!r.ok){ const t = await r.text().catch(() => ''); throw new Error('HTTP ' + r.status + ' · ' + t.slice(0,120)); }
-      tr.className = 'test-result show ok';
-      tr.textContent = '✓ 连接成功，API 可用。';
-    } catch(err){
-      const m = String(err.message || err);
-      if(/Failed to fetch|NetworkError|Load failed/i.test(m)){
-        tr.className = 'test-result show err';
-        tr.innerHTML = '✕ 浏览器直连被拦截（CORS / 网络）。<br>请改用本地服务器打开页面。';
-      } else {
-        tr.className = 'test-result show err';
-        tr.textContent = '✕ ' + m;
-      }
-    }
-  });
-
-  /* ---------- 登录状态 ---------- */
-  if(window.QAuth && window.QAuth.onChange){
-    window.QAuth.onChange(function(info){
-      console.log('[QBTI] 登录状态变化:', info);
-      if(info.isLoggedIn){
-        updateRestoreBanner();
-      } else {
-        state.result = null;
-        state.quantumState = null;
-        state.dimStates = null;
-        state.validity = null;
-        state.aiReportText = null;
-        state.restoredTs = null;
-        const banner = document.getElementById('restoreBanner');
-        if(banner) banner.remove();
-      }
-    });
-  }
-
-  renderQuestion();
-  updateRestoreBanner();
-  console.log('[QBTI] 初始化完成');
-})();
-</script>
+<script src="parent-auth.js"></script>
 </body>
 </html>

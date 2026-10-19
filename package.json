@@ -1,13 +1,12 @@
 {
-  "name": "qbti-local",
+  "name": "qbti-parent",
   "version": "1.0.0",
-  "description": "QBTI 量子人格测评 - Neon 数据库版",
+  "description": "QBTI 家长端独立服务",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.19.2",
-    "pg": "^8.11.3"
+    "express": "^4.19.2"
   }
 }

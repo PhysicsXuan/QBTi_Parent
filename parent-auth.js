@@ -1,8 +1,5 @@
 /* ============================================================
-   QParent —— 家长端逻辑（纯数据查看版）
-   - 注册 / 登录
-   - 扫码 / 邀请码绑定孩子
-   - 查看绑定孩子的报告
+   QParent —— 独立家长端逻辑
    ============================================================ */
 (function(){
   'use strict';
@@ -11,7 +8,10 @@
   const SESSION_KEY = 'qparent_session_v1';
   const SESSION_DURATION = 30 * 24 * 60 * 60 * 1000;
   const CODE_COOLDOWN = 60 * 1000;
-  const API_BASE = '';
+  
+  // ⚠️ 必须修改这里：填入你“学生端”（后端服务器）的完整地址，不要带结尾斜杠
+  // 例如：'https://qbti-api.onrender.com' 或 'https://qbti.onrender.com'
+  const API_BASE = 'https://qbti.onrender.com'; 
 
   const $ = id => document.getElementById(id);
   const app = $('app');
@@ -252,7 +252,7 @@
       toast(r.message || '验证码已发送', 'ok');
     } catch(err){
       setFieldError(form, 'code', '无法连接服务器');
-      toast('无法连接服务器，请确认已启动 server.js', 'err');
+      toast('无法连接服务器，请检查学生端是否正常运行', 'err');
       btn.disabled = false;
       btn.textContent = oldText;
       return;
