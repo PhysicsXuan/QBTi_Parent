@@ -1,5 +1,5 @@
 /* ============================================================
-   QParent —— 独立家长端逻辑
+   QParent —— 独立家长端逻辑（含解绑功能）
    ============================================================ */
 (function(){
   'use strict';
@@ -10,8 +10,7 @@
   const CODE_COOLDOWN = 60 * 1000;
   
   // ⚠️ 必须修改这里：填入你“学生端”（后端服务器）的完整地址，不要带结尾斜杠
-  // 例如：'https://qbti-api.onrender.com' 或 'https://qbti.onrender.com'
-  const API_BASE = 'https://qbti.onrender.com'; 
+  const API_BASE = 'https://你的学生端域名.onrender.com'; 
 
   const $ = id => document.getElementById(id);
   const app = $('app');
@@ -211,6 +210,7 @@
   const RE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
   const RE_PHONE = /^1[3-9]\d{9}$/;
 
+  // 发送验证码（含邮箱排他性检查）
   async function handleSendCode(){
     const form = document.querySelector('#authMask [data-form="register"]');
     const data = getFormData(form);
@@ -432,11 +432,14 @@
         el.innerHTML = '<div class="empty-state">还没有绑定任何孩子。请点击右上角「+ 绑定孩子」。</div>';
         return;
       }
+      
+      // 渲染列表，并在右侧加上解绑按钮
       el.innerHTML = list.map(s => {
         const name = s.studentUsername || s.studentEmail;
         const init = name.slice(0,1).toUpperCase();
         const badge = s.hasReport ? '<span class="sc-badge">有报告</span>' : '<span class="sc-badge empty">暂无报告</span>';
         const meta = s.hasReport ? ('最近更新：' + formatTime(s.reportUpdatedAt)) : ('绑定于 ' + formatTime(s.boundAt));
+        
         return `<div class="student-card" data-type="sync" data-email="${escapeHTML(s.studentEmail)}">
           <div class="sc-head">
             <div class="sc-avatar">${escapeHTML(init)}</div>
@@ -445,18 +448,54 @@
               <div class="sc-meta">${escapeHTML(meta)}</div>
             </div>
             ${badge}
+            <!-- 新增：解绑按钮 -->
+            <button class="unbind-btn" data-email="${escapeHTML(s.studentEmail)}" title="解除绑定">解除</button>
           </div>
         </div>`;
       }).join('');
+      
+      // 绑定点击卡片看报告事件
       el.querySelectorAll('.student-card').forEach(card => {
         card.addEventListener('click', () => showSyncedReport(card.dataset.email));
       });
+
+      // 绑定点击解绑按钮事件（阻止冒泡）
+      el.querySelectorAll('.unbind-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation(); // 阻止触发打开报告
+          handleUnbind(btn.dataset.email);
+        });
+      });
+
     } catch(err){
       $('studentList').innerHTML = '<div class="empty-state" style="color:#FF8FA0;">加载失败：' + escapeHTML(err.message) + '</div>';
     }
   }
 
-  /* ---------- 绑定弹窗（含扫码） ---------- */
+  // 家长端解绑逻辑
+  async function handleUnbind(studentEmail){
+    if(!confirm('确定要解除与该孩子的绑定吗？解除后您将无法再查看他的报告。')) return;
+    
+    try {
+      const res = await fetch(API_BASE + '/api/bind/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          studentEmail: studentEmail, 
+          parentEmail: currentParent.email 
+        })
+      });
+      const data = await res.json();
+      if(!res.ok || !data.success) throw new Error(data.error || '解绑失败');
+      
+      toast('已解除绑定', 'ok');
+      renderDashboard(); // 刷新列表
+    } catch(err){
+      toast('解绑失败：' + err.message, 'err');
+    }
+  }
+
+  /* ---------- 绑定弹窗 ---------- */
   function openBindDialog(prefillCode){
     const old = document.getElementById('bindMask');
     if(old) old.remove();
