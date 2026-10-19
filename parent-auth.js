@@ -1,5 +1,5 @@
 /* ============================================================
-   QParent —— 独立家长端逻辑（包含忘记密码 + 二次确认）
+   QParent —— 独立家长端逻辑（包含忘记密码 + 二次确认 + 真实性展示）
    ============================================================ */
 (function(){
   'use strict';
@@ -524,7 +524,6 @@
       </div>
     `;
     
-    // 🚨 二次确认：退出登录
     $('btnLogout').addEventListener('click', () => {
       if(!confirm('确定要退出登录吗？')) return;
       clearSession(); 
@@ -584,7 +583,6 @@
   }
 
   async function handleUnbind(studentEmail){
-    // 🚨 二次确认：解绑孩子
     if(!confirm('确定要解除与该孩子的绑定吗？')) return;
     
     try {
