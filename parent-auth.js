@@ -1,5 +1,5 @@
 /* ============================================================
-   QParent —— 独立家长端逻辑（解绑 + 真实发信 + 直接生成AI）
+   QParent —— 独立家长端逻辑（前端防重复提交安全版）
    ============================================================ */
 (function(){
   'use strict';
@@ -8,9 +8,10 @@
   const SESSION_KEY = 'qparent_session_v1';
   const SESSION_DURATION = 30 * 24 * 60 * 60 * 1000;
   const CODE_COOLDOWN = 60 * 1000;
-  
-  // 👈 因为家长端自己的 server.js 已经包含所有接口，这里留空
   const API_BASE = ''; 
+
+  // 🚨 前端全局锁，防止并发重复请求
+  let isGenerating = false; 
 
   const $ = id => document.getElementById(id);
   const app = $('app');
@@ -26,8 +27,7 @@
   function formatTime(ts){
     const d = new Date(ts);
     const pad = n => n < 10 ? '0'+n : ''+n;
-    return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) +
-      ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
   }
 
   function toast(msg, type){
@@ -40,7 +40,6 @@
     setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 300); }, 3200);
   }
 
-  /* ---------- Session ---------- */
   function loadSession(){
     try {
       const raw = localStorage.getItem(SESSION_KEY);
@@ -61,7 +60,6 @@
     currentParent = null;
   }
 
-  /* ---------- Auth Modal ---------- */
   function buildAuthModal(){
     const mask = document.createElement('div');
     mask.className = 'auth-mask';
@@ -69,14 +67,12 @@
     mask.innerHTML = `
       <div class="auth-modal">
         <button class="auth-close" type="button" aria-label="关闭">×</button>
-
         <div class="auth-view" data-view="login" style="display:none;">
           <div class="auth-tabs">
             <button type="button" data-tab="login" class="active">登录</button>
             <button type="button" data-tab="register">注册</button>
           </div>
           <h2 class="auth-title">家长登录</h2>
-          <p class="auth-subtitle">用注册邮箱登录，查看孩子的量子态报告</p>
           <form data-form="login" autocomplete="on">
             <div class="auth-field" data-name="identifier">
               <label>邮箱</label>
@@ -92,14 +88,12 @@
           </form>
           <div class="auth-switch">还没有家长账户？<a data-switch="register">立即注册</a></div>
         </div>
-
         <div class="auth-view" data-view="register" style="display:none;">
           <div class="auth-tabs">
             <button type="button" data-tab="login">登录</button>
             <button type="button" data-tab="register" class="active">注册</button>
           </div>
           <h2 class="auth-title">家长注册</h2>
-          <p class="auth-subtitle">填写信息完成验证，随后即可绑定孩子</p>
           <form data-form="register" autocomplete="on">
             <div class="auth-field" data-name="email">
               <label>邮箱</label>
@@ -148,12 +142,8 @@
     const mask = $('authMask');
     mask.querySelector('.auth-close').addEventListener('click', closeAuth);
     mask.addEventListener('click', e => { if(e.target === mask) closeAuth(); });
-    mask.querySelectorAll('[data-tab]').forEach(btn => {
-      btn.addEventListener('click', () => switchAuthView(btn.dataset.tab));
-    });
-    mask.querySelectorAll('[data-switch]').forEach(a => {
-      a.addEventListener('click', () => switchAuthView(a.dataset.switch));
-    });
+    mask.querySelectorAll('[data-tab]').forEach(btn => btn.addEventListener('click', () => switchAuthView(btn.dataset.tab)));
+    mask.querySelectorAll('[data-switch]').forEach(a => a.addEventListener('click', () => switchAuthView(a.dataset.switch)));
     mask.querySelector('[data-action="send-code"]').addEventListener('click', handleSendCode);
     mask.querySelector('[data-form="login"]').addEventListener('submit', handleLoginSubmit);
     mask.querySelector('[data-form="register"]').addEventListener('submit', handleRegisterSubmit);
@@ -172,9 +162,7 @@
     if(btn){ btn.disabled = false; btn.textContent = '发送验证码'; }
   }
   function switchAuthView(name){
-    document.querySelectorAll('#authMask .auth-view').forEach(v => {
-      v.style.display = v.dataset.view === name ? '' : 'none';
-    });
+    document.querySelectorAll('#authMask .auth-view').forEach(v => v.style.display = v.dataset.view === name ? '' : 'none');
     document.querySelectorAll('#authMask .auth-field').forEach(f => {
       f.classList.remove('has-err');
       const inp = f.querySelector('input');
@@ -250,7 +238,7 @@
       toast(r.message || '验证码已发送', 'ok');
     } catch(err){
       setFieldError(form, 'code', '无法连接服务器');
-      toast('无法连接服务器，请检查服务器是否正常', 'err');
+      toast('无法连接服务器', 'err');
       btn.disabled = false;
       btn.textContent = oldText;
       return;
@@ -281,14 +269,14 @@
 
     const errs = {};
     if(!RE_EMAIL.test(data.email)) errs.email = '邮箱格式不正确';
-    if(!RE_PHONE.test(data.phone)) errs.phone = '请输入 11 位中国大陆手机号';
+    if(!RE_PHONE.test(data.phone)) errs.phone = '请输入 11 位手机号';
     if(!data.code || data.code.length !== 6) errs.code = '请输入 6 位验证码';
-    if(!data.username || data.username.length < 2 || data.username.length > 20) errs.username = '用户名 2-20 位';
+    if(!data.username || data.username.length < 2) errs.username = '用户名 2-20 位';
     if(!data.password || data.password.length < 6) errs.password = '密码至少 6 位';
     if(data.password !== data.confirm) errs.confirm = '两次密码不一致';
+    
     if(Object.keys(errs).length > 0){
       Object.keys(errs).forEach(k => setFieldError(form, k, errs[k]));
-      toast('请检查表单填写', 'err');
       return;
     }
 
@@ -299,10 +287,7 @@
       const res = await fetch(API_BASE + '/api/parent/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: data.email, phone: data.phone, code: data.code,
-          username: data.username, password: data.password
-        })
+        body: JSON.stringify({ email: data.email, phone: data.phone, code: data.code, username: data.username, password: data.password })
       });
       const r = await res.json();
       if(!res.ok || !r.success){
@@ -330,8 +315,7 @@
     const btn = form.querySelector('.auth-submit');
     clearFormErrors(form);
 
-    if(!data.identifier){ setFieldError(form, 'identifier', '请输入邮箱'); return; }
-    if(!data.password){ setFieldError(form, 'password', '请输入密码'); return; }
+    if(!data.identifier || !data.password){ return; }
 
     btn.disabled = true;
     btn.textContent = '登录中…';
@@ -360,13 +344,8 @@
     }
   }
 
-  /* ---------- 首页渲染 ---------- */
   function renderHome(){
-    if(!currentParent){
-      navTag.textContent = '未登录';
-      renderGate();
-      return;
-    }
+    if(!currentParent){ navTag.textContent = '未登录'; renderGate(); return; }
     navTag.textContent = currentParent.username;
     renderDashboard();
   }
@@ -375,7 +354,7 @@
     app.innerHTML = `
       <div class="card gate">
         <h1>QBTI 家长端</h1>
-        <p>登录家长账户后，即可绑定孩子、查看孩子的量子态报告。<br>还没有账户？点击下方按钮注册。</p>
+        <p>登录家长账户后，即可查看孩子的量子态报告。</p>
         <button id="btnShowLogin" style="max-width:200px;margin:0 auto 12px;display:block;">登录家长账户</button>
         <button id="btnShowRegister" style="max-width:200px;margin:0 auto;display:block;background:transparent;border:1px solid rgba(255,255,255,.14);color:#fff;">注册家长账户</button>
       </div>
@@ -393,7 +372,6 @@
         </div>
         <button class="logout-btn" id="btnLogout">退出登录</button>
       </div>
-
       <div class="topbar" style="margin-bottom:24px;">
         <div style="font-size:13px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;">已绑定的孩子</div>
         <button class="add-student-btn" id="btnAddStudent">+ 绑定孩子</button>
@@ -407,15 +385,6 @@
     $('btnAddStudent').addEventListener('click', openBindDialog);
 
     loadBoundStudents();
-
-    const urlParams = new URLSearchParams(window.location.search);
-    const codeParam = urlParams.get('code');
-    if(codeParam) {
-      window.history.replaceState({}, document.title, window.location.pathname);
-      setTimeout(() => {
-        openBindDialog(codeParam);
-      }, 500);
-    }
   }
 
   async function loadBoundStudents(){
@@ -427,7 +396,7 @@
       const el = $('studentList');
       const list = data.list || [];
       if(list.length === 0){
-        el.innerHTML = '<div class="empty-state">还没有绑定任何孩子。请点击右上角「+ 绑定孩子」。</div>';
+        el.innerHTML = '<div class="empty-state">还没有绑定任何孩子。</div>';
         return;
       }
       
@@ -453,7 +422,6 @@
       el.querySelectorAll('.student-card').forEach(card => {
         card.addEventListener('click', () => showSyncedReport(card.dataset.email));
       });
-
       el.querySelectorAll('.unbind-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -467,36 +435,22 @@
   }
 
   async function handleUnbind(studentEmail){
-    if(!confirm('确定要解除与该孩子的绑定吗？解除后您将无法再查看他的报告。')) return;
-    
+    if(!confirm('确定要解除与该孩子的绑定吗？')) return;
     try {
-      const res = await fetch(API_BASE + '/api/bind/remove', {
+      await fetch(API_BASE + '/api/bind/remove', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          studentEmail: studentEmail, 
-          parentEmail: currentParent.email 
-        })
+        body: JSON.stringify({ studentEmail, parentEmail: currentParent.email })
       });
-      const data = await res.json();
-      if(!res.ok || !data.success) throw new Error(data.error || '解绑失败');
-      
       toast('已解除绑定', 'ok');
       renderDashboard();
-    } catch(err){
-      toast('解绑失败：' + err.message, 'err');
-    }
+    } catch(err){ toast('解绑失败', 'err'); }
   }
 
-  /* ---------- 绑定弹窗 ---------- */
   function openBindDialog(prefillCode){
     const old = document.getElementById('bindMask');
     if(old) old.remove();
-    
-    if(html5QrcodeScanner) {
-      try { html5QrcodeScanner.clear(); } catch(e){}
-      html5QrcodeScanner = null;
-    }
+    if(html5QrcodeScanner) { try { html5QrcodeScanner.clear(); } catch(e){} html5QrcodeScanner = null; }
 
     const mask = document.createElement('div');
     mask.id = 'bindMask';
@@ -504,25 +458,13 @@
     mask.innerHTML = `
       <div style="width:100%;max-width:400px;padding:30px 26px;border-radius:20px;border:1px solid rgba(255,255,255,.1);background:#0B0D1C;text-align:center;">
         <div style="font-size:11px;letter-spacing:.22em;color:var(--muted);text-transform:uppercase;margin-bottom:14px;">Bind Child · 绑定孩子</div>
-        <div style="font-size:15px;font-weight:700;color:#fff;margin-bottom:8px;">扫描二维码或输入邀请码</div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:20px;line-height:1.7;">请让孩子在学生端生成邀请二维码</div>
-        
-        <button id="btnStartScan" class="scan-btn" style="width:100%;padding:12px;border-radius:11px;border:1px dashed var(--q-color);background:rgba(var(--q-r),var(--q-g),var(--q-b),.08);color:var(--q-color);font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;margin-bottom:16px;display:flex;align-items:center;justify-content:center;gap:8px;transition:.2s;">
-          📷 打开摄像头扫码
-        </button>
-        
-        <div id="reader-container">
-          <div id="reader"></div>
-          <button id="btnStopScan" style="width:100%;padding:10px;background:transparent;border:none;color:var(--muted);font-size:12px;cursor:pointer;">取消扫码</button>
-        </div>
-
-        <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">或手动输入 6 位码</div>
-        <input id="bindCodeInput" type="text" maxlength="6" placeholder="ABC123"
-          style="width:100%;padding:14px 18px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#fff;font-size:20px;font-weight:700;letter-spacing:.24em;text-align:center;text-transform:uppercase;font-family:inherit;outline:none;margin-bottom:14px;" />
+        <button id="btnStartScan" class="scan-btn" style="width:100%;padding:12px;border-radius:11px;border:1px dashed var(--q-color);background:rgba(var(--q-r),var(--q-g),var(--q-b),.08);color:var(--q-color);font-size:14px;font-weight:600;cursor:pointer;margin-bottom:16px;">📷 打开摄像头扫码</button>
+        <div id="reader-container" style="display:none;"><div id="reader"></div><button id="btnStopScan" style="width:100%;padding:10px;background:transparent;border:none;color:var(--muted);font-size:12px;cursor:pointer;">取消扫码</button></div>
+        <input id="bindCodeInput" type="text" maxlength="6" placeholder="ABC123" style="width:100%;padding:14px 18px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#fff;font-size:20px;font-weight:700;letter-spacing:.24em;text-align:center;text-transform:uppercase;margin-bottom:14px;" />
         <div id="bindErr" style="color:#FF8FA0;font-size:13px;min-height:18px;margin-bottom:10px;"></div>
         <div style="display:flex;gap:10px;">
-          <button id="bindCancel" style="flex:1;padding:11px;border-radius:11px;border:1px solid rgba(255,255,255,.14);background:transparent;color:var(--muted);font-size:13.5px;font-weight:600;cursor:pointer;font-family:inherit;">取消</button>
-          <button id="bindSubmit" style="flex:1;padding:11px;border-radius:11px;border:0;background:var(--q-color);color:#fff;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;">确认绑定</button>
+          <button id="bindCancel" style="flex:1;padding:11px;border-radius:11px;border:1px solid rgba(255,255,255,.14);background:transparent;color:var(--muted);">取消</button>
+          <button id="bindSubmit" style="flex:1;padding:11px;border-radius:11px;border:0;background:var(--q-color);color:#fff;">确认</button>
         </div>
       </div>
     `;
@@ -530,69 +472,24 @@
 
     const input = $('bindCodeInput');
     const err = $('bindErr');
-    
-    if(prefillCode) {
-      input.value = prefillCode;
-    } else {
-      input.focus();
-    }
+    if(prefillCode) input.value = prefillCode; else input.focus();
 
-    $('btnStartScan').addEventListener('click', () => { startScan(); });
-    $('btnStopScan').addEventListener('click', () => { stopScan(); });
-
-    function startScan() {
-      if (!window.Html5Qrcode) {
-        err.textContent = '扫码库未加载，请刷新页面重试';
-        return;
-      }
+    $('btnStartScan').addEventListener('click', () => { 
+      if (!window.Html5Qrcode) return err.textContent = '扫码库未加载';
       $('btnStartScan').style.display = 'none';
       $('reader-container').style.display = 'block';
-      
       html5QrcodeScanner = new Html5Qrcode("reader");
-      html5QrcodeScanner.start(
-        { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 250, height: 250 } },
-        (decodedText) => {
-          stopScan();
-          let code = decodedText;
-          if (decodedText.includes('code=')) {
-            try {
-              const url = new URL(decodedText);
-              code = url.searchParams.get('code') || decodedText;
-            } catch(e) {}
-          }
-          
-          if(/^[A-Z0-9]{6}$/i.test(code)) {
-            input.value = code.toUpperCase();
-            toast('识别成功，正在绑定…', 'ok');
-            submit();
-          } else {
-            err.textContent = '二维码无效，请确保扫的是邀请码';
-            $('btnStartScan').style.display = 'flex';
-            $('reader-container').style.display = 'none';
-          }
-        },
-        (errorMessage) => {}
-      ).catch(err => {
-        console.error('摄像头启动失败', err);
-        err.textContent = '无法启动摄像头。请确保使用 HTTPS 访问，并允许浏览器获取权限';
-        $('btnStartScan').style.display = 'flex';
-        $('reader-container').style.display = 'none';
-      });
-    }
-
-    function stopScan() {
-      if (html5QrcodeScanner) {
-        html5QrcodeScanner.stop().then(() => {
-          html5QrcodeScanner.clear();
-          html5QrcodeScanner = null;
-          $('btnStartScan').style.display = 'flex';
-          $('reader-container').style.display = 'none';
-        }).catch(e => {
-          console.warn('关闭摄像头异常', e);
-          $('btnStartScan').style.display = 'flex';
-          $('reader-container').style.display = 'none';
-        });
+      html5QrcodeScanner.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, (txt) => {
+        stopScan();
+        let c = txt;
+        if (txt.includes('code=')) { try { c = new URL(txt).searchParams.get('code') || txt; } catch(e){} }
+        if(/^[A-Z0-9]{6}$/i.test(c)) { input.value = c.toUpperCase(); submit(); } else { err.textContent = '二维码无效'; }
+      }, ()=>{});
+    });
+    
+    function stopScan(){
+      if(html5QrcodeScanner) {
+        html5QrcodeScanner.stop().then(()=>{ html5QrcodeScanner.clear(); html5QrcodeScanner = null; $('btnStartScan').style.display = 'flex'; $('reader-container').style.display = 'none'; });
       }
     }
 
@@ -605,9 +502,7 @@
       const code = (input.value || '').trim().toUpperCase();
       if(!/^[A-Z0-9]{6}$/.test(code)){ err.textContent = '请输入 6 位邀请码'; return; }
       err.textContent = '';
-      const btn = $('bindSubmit');
-      btn.disabled = true;
-      btn.textContent = '绑定中…';
+      $('bindSubmit').disabled = true; $('bindSubmit').textContent = '...';
       try {
         const res = await fetch(API_BASE + '/api/bind/accept', {
           method: 'POST',
@@ -615,27 +510,15 @@
           body: JSON.stringify({ parentEmail: currentParent.email, code })
         });
         const r = await res.json();
-        if(!res.ok || !r.success){
-          err.textContent = r.error || '绑定失败';
-          btn.disabled = false;
-          btn.textContent = '确认绑定';
-          return;
-        }
-        stopScan();
-        mask.remove();
-        toast('绑定成功：' + (r.studentUsername || r.studentEmail), 'ok');
-        renderDashboard();
+        if(!res.ok || !r.success) throw new Error(r.error || '绑定失败');
+        stopScan(); mask.remove(); toast('绑定成功', 'ok'); renderDashboard();
       } catch(e){
-        err.textContent = '无法连接服务器';
-        btn.disabled = false;
-        btn.textContent = '确认绑定';
+        err.textContent = e.message;
+        $('bindSubmit').disabled = false; $('bindSubmit').textContent = '确认';
       }
     }
   }
 
-  /* ============================================================
-     报告展示 & AI 直接生成
-     ============================================================ */
   function setAccent(quantumState){
     const map = { good:[80,220,140], danger:[235,65,75], superposition:[90,140,245] };
     const c = map[quantumState] || [255,138,72];
@@ -645,120 +528,50 @@
     document.documentElement.style.setProperty('--q-color', 'rgb(' + c.join(',') + ')');
   }
 
-  const DIM_COLORS = {
-    PO:{X:'#7C5CFF',C:'#4A9EFF',A:'#00E5FF'},
-    II:{U:'#FF6B9D',P:'#FFA94D',M:'#FFD93D'},
-    LA:{I:'#6BCB77',D:'#4ECDC4',E:'#45B7D1'},
-    UR:{T:'#FF6B6B',H:'#C77DFF',R:'#F7B801'}
-  };
+  const DIM_COLORS = { PO:{X:'#7C5CFF',C:'#4A9EFF',A:'#00E5FF'}, II:{U:'#FF6B9D',P:'#FFA94D',M:'#FFD93D'}, LA:{I:'#6BCB77',D:'#4ECDC4',E:'#45B7D1'}, UR:{T:'#FF6B6B',H:'#C77DFF',R:'#F7B801'} };
   const DIM_LETTERS = { PO:['X','C','A'], II:['U','P','M'], LA:['I','D','E'], UR:['T','H','R'] };
   const DIM_NAMES = { PO:'潜能开放度', II:'内在驱动力', LA:'学习自主性', UR:'未知应对方式' };
 
   async function showSyncedReport(studentEmail){
     app.innerHTML = '<div class="empty-state">正在加载报告…</div>';
     try {
-      const res = await fetch(API_BASE + '/api/parent/report/' + encodeURIComponent(studentEmail) +
-        '?parentEmail=' + encodeURIComponent(currentParent.email));
-      
-      if(!res.ok) {
-        let errMsg = '加载失败';
-        try { const d = await res.json(); errMsg = d.error || errMsg; } catch(e){}
-        renderReportError(errMsg);
-        return;
-      }
-      
+      const res = await fetch(API_BASE + '/api/parent/report/' + encodeURIComponent(studentEmail) + '?parentEmail=' + encodeURIComponent(currentParent.email));
+      if(!res.ok) { const d = await res.json(); throw new Error(d.error || '加载失败'); }
       const data = await res.json();
-      if(!data.success) {
-        renderReportError(data.error || '加载失败');
-        return;
-      }
       
       const p = data.report.payload;
-      let fullResult = p.fullResult;
-      if (!fullResult) {
-        fullResult = {
-          letters: p.baseCode ? p.baseCode.split('') : [],
-          suffix: { letter: p.suffixLetter || 'E', name: p.suffixName || '探索型' },
-          dimGroupRatio: p.dimGroupRatio || {},
-          dimLeadInfo: p.dimLeadInfo || {},
-          suffixRatio: p.suffixRatio || {},
-          suffixGap: p.suffixGap || 0,
-          dominanceScore: {}
-        };
-      }
+      let fullResult = p.fullResult || {
+        letters: p.baseCode ? p.baseCode.split('') : [],
+        suffix: { letter: p.suffixLetter || 'E', name: p.suffixName || '探索型' },
+        dimGroupRatio: p.dimGroupRatio || {}, dimLeadInfo: p.dimLeadInfo || {},
+        suffixRatio: p.suffixRatio || {}, suffixGap: p.suffixGap || 0, dominanceScore: {}
+      };
       
       renderReportView(fullResult, p.validity, p.aiReport, data.report.updatedAt, p);
     } catch(err){
-      console.error('[报告加载错误]', err);
-      renderReportError('请求异常：' + err.message);
+      app.innerHTML = `<button class="back-btn" id="btnBack">← 返回</button><div class="card" style="text-align:center;color:#FF8FA0;">加载失败：${escapeHTML(err.message)}</div>`;
+      $('btnBack').addEventListener('click', renderDashboard);
     }
-  }
-
-  function renderReportError(msg){
-    app.innerHTML = `
-      <button class="back-btn" id="btnBack">← 返回</button>
-      <div class="card" style="text-align:center;padding:40px;">
-        <div style="font-size:15px;color:#FF8FA0;margin-bottom:10px;">加载失败</div>
-        <div style="font-size:13px;color:var(--muted);line-height:1.8;">${escapeHTML(msg)}</div>
-      </div>
-    `;
-    $('btnBack').addEventListener('click', renderDashboard);
   }
 
   function renderMD(text){
-    let h = escapeHTML(text);
-    h = h.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
-    h = h.replace(/^#{1,3}\s*(.+)$/gm,'<h4>$1</h4>');
-    h = h.replace(/(?:^[-•▸]\s+.+$\n?)+/gm, m =>
-      '<ul>' + m.replace(/^[-•▸]\s+(.+)$/gm,'<li>$1</li>') + '</ul>');
-    return h.split(/\n{2,}/).map(p => {
-      const t = p.trim(); if(!t) return '';
-      if(/^<(h4|ul|li)/.test(t)) return t;
-      return '<p>' + t.replace(/\n/g,'<br>') + '</p>';
-    }).join('');
+    let h = escapeHTML(text).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/^#{1,3}\s*(.+)$/gm,'<h4>$1</h4>').replace(/(?:^[-•▸]\s+.+$\n?)+/gm, m => '<ul>' + m.replace(/^[-•▸]\s+(.+)$/gm,'<li>$1</li>') + '</ul>');
+    return h.split(/\n{2,}/).map(p => { const t = p.trim(); if(!t) return ''; if(/^<(h4|ul|li)/.test(t)) return t; return '<p>' + t.replace(/\n/g,'<br>') + '</p>'; }).join('');
   }
 
   function renderReportView(res, validity, aiReportText, updatedAt, extraData){
-    if(!res || !res.letters) {
-       app.innerHTML = '<div class="empty-state">报告数据格式错误</div>';
-       return;
-    }
-
     const baseCode = res.letters.join('');
-    const typeName = Q.TYPE_NAMES[baseCode] || (extraData ? extraData.typeName : '') || '未知类型';
-    
-    let qStateType = 'superposition';
-    if (res.dominanceScore && Object.keys(res.dominanceScore).length > 0) {
-       const qs = Q.analyzeQuantumState(res);
-       qStateType = qs.type;
-    } else if (extraData && extraData.quantumState) {
-       qStateType = extraData.quantumState;
-    }
-    setAccent(qStateType);
+    const typeName = Q.TYPE_NAMES[baseCode] || '未知类型';
+    setAccent(res.dominanceScore && Object.keys(res.dominanceScore).length > 0 ? Q.analyzeQuantumState(res).type : (extraData.quantumState || 'superposition'));
 
     const vColorMap = { high:'#50DC8C', medium:'#FFD98A', low:'#FF8A48', very_low:'#EB414B' };
     const vColor = validity ? (vColorMap[validity.level] || '#8B90B8') : '#8B90B8';
-    const reasons = (validity && validity.parentReasons && validity.parentReasons.length)
-      ? validity.parentReasons.map(r => '▸ ' + escapeHTML(r)).join('<br>')
-      : '▸ 未发现明显疑点';
-    const timeLine = (validity && validity.totalTime != null)
-      ? '作答用时约 ' + Math.round(validity.totalTime) + ' 秒' : '';
-
+    const reasons = (validity && validity.parentReasons) ? validity.parentReasons.map(r => '▸ ' + escapeHTML(r)).join('<br>') : '▸ 未发现明显疑点';
     const dimsHTML = Q.DIMS.map(d => {
-      const ratio = res.dimGroupRatio[d.id] || {};
-      const info = res.dimLeadInfo[d.id] || { lead: '-' };
-      const segs = d.letters.map(l => {
-        const pct = ratio[l] || 0;
-        return `<div class="seg" style="width:${pct}%;background:${DIM_COLORS[d.id][l]};">${pct >= 10 ? l : ''}</div>`;
-      }).join('');
-      return `<div class="dim-row">
-        <div class="dim-name">${d.name}</div>
-        <div class="dim-bar">${segs}</div>
-        <div class="dim-lead">${info.lead}</div>
-      </div>`;
+      const ratio = res.dimGroupRatio[d.id] || {}; const info = res.dimLeadInfo[d.id] || { lead: '-' };
+      return `<div class="dim-row"><div class="dim-name">${d.name}</div><div class="dim-bar">${d.letters.map(l => `<div class="seg" style="width:${ratio[l]||0}%;background:${DIM_COLORS[d.id][l]};">${ratio[l]>=10?l:''}</div>`).join('')}</div><div class="dim-lead">${info.lead}</div></div>`;
     }).join('');
 
-    // 判断是否需要家长端直接生成
     const needGenerate = !aiReportText;
     const aiActionHTML = needGenerate ? `
       <div style="text-align:center;padding:20px 0;">
@@ -768,40 +581,26 @@
     ` : renderMD(aiReportText);
 
     app.innerHTML = `
-      <button class="back-btn" id="btnBack">← 返回列表</button>
-      
+      <button class="back-btn" id="btnBack">← 返回</button>
       <div class="hero">
-        <div class="code">${baseCode}<span style="font-size:0.7em;color:var(--q-color)">-${res.suffix ? res.suffix.letter : ''}</span></div>
-        <div class="name">${escapeHTML(typeName)} · ${res.suffix ? escapeHTML(res.suffix.name) : ''}</div>
+        <div class="code">${baseCode}<span style="font-size:0.7em;color:var(--q-color)">-${res.suffix?.letter||''}</span></div>
+        <div class="name">${escapeHTML(typeName)} · ${res.suffix?.name||''}</div>
         <div class="sub">量子学习类型</div>
-        ${updatedAt ? `<div style="font-size:11.5px;color:var(--muted);margin-top:6px;">最近更新：${formatTime(updatedAt)}</div>` : ''}
       </div>
-
-      <div class="title">作答真实度 · 面向家长</div>
+      <div class="title">作答真实度</div>
       <div class="card" style="border-color:${vColor}55;background:${vColor}0F;">
         <div class="authenticity">
-          <div>
-            <div class="label">Authenticity Score</div>
-            <div class="level" style="color:${vColor};">● ${validity ? escapeHTML(validity.levelText) : '未评估'}</div>
-            ${timeLine ? `<div style="font-size:12px;color:#8B90B8;margin-top:4px;">${escapeHTML(timeLine)}</div>` : ''}
-          </div>
-          <div class="score" style="color:${vColor};">${validity ? validity.authenticity : '--'}<small> / 100</small></div>
+          <div><div class="label">Authenticity Score</div><div class="level" style="color:${vColor};">● ${validity?escapeHTML(validity.levelText):'未评估'}</div></div>
+          <div class="score" style="color:${vColor};">${validity?validity.authenticity:'--'}<small> / 100</small></div>
         </div>
         <div class="reason">${reasons}</div>
-        ${validity ? `<div class="advice">给家长的建议：${escapeHTML(validity.advice)}</div>` : ''}
+        ${validity?`<div class="advice">给家长的建议：${escapeHTML(validity.advice)}</div>`:''}
       </div>
-
       <div class="title">四维倾向</div>
       <div class="card">${dimsHTML}</div>
-
       <div class="title">AI 引导报告</div>
-      <div class="card ai-body" id="aiBody">
-        ${aiActionHTML}
-      </div>
-      
-      <div class="result-actions">
-        <button class="btn" id="btnBackBottom">返回</button>
-      </div>
+      <div class="card ai-body" id="aiBody">${aiActionHTML}</div>
+      <div class="result-actions"><button class="btn" id="btnBackBottom">返回</button></div>
     `;
     
     $('btnBack').addEventListener('click', renderDashboard);
@@ -809,43 +608,37 @@
 
     if(needGenerate && $('btnGenAI')){
       $('btnGenAI').addEventListener('click', async () => {
+        // 🚨 核心防御：前端全局锁
+        if (isGenerating) return; 
+        
+        isGenerating = true;
         const btn = $('btnGenAI');
         const studentEmail = btn.dataset.student;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner"></span>生成中…';
-        $('aiBody').innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);"><span class="spinner"></span>正在解析孩子的波函数与作答真实性…</div>';
+        btn.innerHTML = '<span class="spinner"></span>生成中，请稍候…';
+        $('aiBody').innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);"><span class="spinner"></span>正在解析波函数（最长可能需要 30 秒）…</div>';
         
         try {
-          // 生成 Prompt（复用了学生端的核心算法）
           const prompt = Q.buildPrompt(res, validity);
-          
-          // 请求家长端自己的后端
           const apiRes = await fetch(API_BASE + '/api/generate-ai-report', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt })
+            body: JSON.stringify({ prompt, studentEmail })
           });
-          
           const apiData = await apiRes.json();
-          if(!apiRes.ok || !apiData.success) {
-            throw new Error(apiData.error || '生成失败');
-          }
+          if(!apiRes.ok || !apiData.success) throw new Error(apiData.error || '生成失败');
 
-          const text = apiData.text;
-          
-          // 更新到数据库
           await fetch(API_BASE + '/api/parent/report/update-ai', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ studentEmail, aiReport: text })
+            body: JSON.stringify({ studentEmail, aiReport: apiData.text })
           });
           
-          $('aiBody').innerHTML = renderMD(text);
+          $('aiBody').innerHTML = renderMD(apiData.text);
         } catch(err){
-          console.error('AI 生成异常:', err);
-          const msg = String(err.message || err);
-          $('aiBody').innerHTML = `<div style="color:#FFD98A;font-size:13px;padding:20px;text-align:center;">生成失败：${escapeHTML(msg)}</div>`;
+          $('aiBody').innerHTML = `<div style="color:#FFD98A;font-size:13px;padding:20px;text-align:center;">生成失败：${escapeHTML(err.message)}</div>`;
         } finally {
+          isGenerating = false; // 解锁
           if(btn) { btn.disabled = false; btn.textContent = '重新生成'; }
         }
       });

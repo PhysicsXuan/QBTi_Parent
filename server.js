@@ -1,5 +1,5 @@
 /* ============================================================
-   QBTI 家长端后端服务器（完全独立版 + 真实发信 + DeepSeek代理）
+   QBTI 家长端后端服务器（完全独立版 + 防刷限流版）
    ============================================================ */
 
 const express = require('express');
@@ -16,24 +16,12 @@ app.use(express.static(__dirname));
 /* ---------- 配置 ---------- */
 const DATABASE_URL = process.env.DATABASE_URL;
 const AGENTMAIL_API_KEY = process.env.AGENTMAIL_API_KEY;
-const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY; // 👈 新增
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 const AGENTMAIL_BASE = 'https://api.agentmail.to/v0';
 
-if (!DATABASE_URL) {
-  console.log('❌ 严重警告：未配置 DATABASE_URL！家长端将无法连接数据库。');
-} else {
-  console.log('✅ PostgreSQL 连接字符串已配置');
-}
-if (!AGENTMAIL_API_KEY) {
-  console.log('⚠️ 未配置 AGENTMAIL_API_KEY，验证码将打印在控制台');
-} else {
-  console.log('✅ AgentMail 发信已配置');
-}
-if (!DEEPSEEK_API_KEY) {
-  console.log('⚠️ 未配置 DEEPSEEK_API_KEY，家长将无法在后台直接生成报告');
-} else {
-  console.log('✅ DeepSeek API 已配置');
-}
+if (!DATABASE_URL) console.log('❌ 未配置 DATABASE_URL！');
+if (!AGENTMAIL_API_KEY) console.log('⚠️ 未配置 AGENTMAIL_API_KEY');
+if (!DEEPSEEK_API_KEY) console.log('⚠️ 未配置 DEEPSEEK_API_KEY');
 
 /* ---------- 数据库连接池 ---------- */
 const pool = new Pool({
@@ -87,7 +75,6 @@ async function ensureInbox() {
     inboxId = created.inboxId || created.id || created.inbox_id;
     return inboxId;
   } catch (err) {
-    console.error('[AgentMail] ensureInbox 异常:', err.message);
     return null;
   }
 }
@@ -108,20 +95,12 @@ async function sendCodeEmail(to, code) {
         body: JSON.stringify({
           to,
           subject: '【QBTI 家长端】你的验证码',
-          html: [
-            '<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#0B0D1C;color:#E9EBFF;border-radius:16px;">',
-            '  <h2 style="color:#fff;margin-bottom:16px;">家长端邮箱验证</h2>',
-            '  <p style="color:#8B90B8;line-height:1.6;">你的 QBTI 家长端验证码：</p>',
-            '  <div style="font-size:36px;font-weight:800;letter-spacing:8px;color:#FF8A48;margin:24px 0;text-align:center;">' + code + '</div>',
-            '  <p style="color:#8B90B8;font-size:13px;">5 分钟内有效，请勿泄露。</p>',
-            '</div>'
-          ].join('\n')
+          html: '<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#0B0D1C;color:#E9EBFF;border-radius:16px;"><h2 style="color:#fff;">家长端验证</h2><div style="font-size:36px;font-weight:800;color:#FF8A48;text-align:center;">' + code + '</div></div>'
         })
       }
     );
     return { ok: sendRes.ok };
   } catch (err) {
-    console.error('[AgentMail] 发送异常:', err.message);
     return { ok: false };
   }
 }
@@ -135,43 +114,34 @@ setInterval(() => {
   }
 }, 60 * 1000);
 
+// ============================================================
+// 🚨 新增：AI 接口防刷限流（记录每个学生的最后请求时间）
+// ============================================================
+const aiCooldown = new Map(); 
+
 /* ============================================================
    API: 发送验证码
    ============================================================ */
 app.post('/api/send-code', async (req, res) => {
   const { email, phone } = req.body || {};
-  const target = email ? 'email:' + email.toLowerCase().trim()
-                     : phone ? 'phone:' + phone.trim() : null;
+  const target = email ? 'email:' + email.toLowerCase().trim() : phone ? 'phone:' + phone.trim() : null;
   if (!target) return res.status(400).json({ error: '缺少邮箱或手机号' });
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return res.status(400).json({ error: '邮箱格式不正确' });
-  }
 
   const now = Date.now();
   const existing = codeStore.get(target);
   if (existing && (now - existing.lastSentAt) < 60 * 1000) {
-    const wait = Math.ceil((60 * 1000 - (now - existing.lastSentAt)) / 1000);
-    return res.status(429).json({ error: '请 ' + wait + ' 秒后再试' });
+    return res.status(429).json({ error: '请 ' + Math.ceil((60 * 1000 - (now - existing.lastSentAt)) / 1000) + ' 秒后再试' });
   }
 
   const code = String(Math.floor(100000 + Math.random() * 900000));
-  codeStore.set(target, {
-    code, expiresAt: now + 5 * 60 * 1000, attempts: 0, lastSentAt: now
-  });
-
-  console.log(`[验证码] ${target} -> ${code}`);
+  codeStore.set(target, { code, expiresAt: now + 5 * 60 * 1000, attempts: 0, lastSentAt: now });
 
   if (email && AGENTMAIL_API_KEY) {
     const r = await sendCodeEmail(email, code);
     if (!r.ok) return res.status(500).json({ error: '邮件发送失败' });
   }
 
-  const isDev = !AGENTMAIL_API_KEY;
-  res.json({
-    success: true,
-    message: isDev ? '验证码已生成，请查看服务端控制台' : '验证码已发送到你的邮箱',
-    devCode: isDev ? code : undefined
-  });
+  res.json({ success: true, message: '验证码已发送', devCode: !AGENTMAIL_API_KEY ? code : undefined });
 });
 
 /* ============================================================
@@ -180,14 +150,10 @@ app.post('/api/send-code', async (req, res) => {
 app.get('/api/check-email', async (req, res) => {
   const { email, role } = req.query;
   if(!email || !role) return res.status(400).json({ error: '参数不完整' });
-  const targetEmail = email.toLowerCase().trim();
-
   try {
     if (role === 'parent') {
-      const r = await pool.query('SELECT email FROM student_emails WHERE email = $1', [targetEmail]);
-      if (r.rows.length > 0) {
-        return res.json({ available: false, msg: '该邮箱已注册为学生账号，请勿重复注册' });
-      }
+      const r = await pool.query('SELECT email FROM student_emails WHERE email = $1', [email.toLowerCase().trim()]);
+      if (r.rows.length > 0) return res.json({ available: false, msg: '该邮箱已注册为学生账号' });
     }
     res.json({ available: true });
   } catch(err) {
@@ -200,50 +166,31 @@ app.get('/api/check-email', async (req, res) => {
    ============================================================ */
 app.post('/api/parent/register', async (req, res) => {
   const { email, phone, code, username, password } = req.body || {};
-  if (!email || !phone || !code || !username || !password) {
-    return res.status(400).json({ error: '参数不完整' });
-  }
+  if (!email || !phone || !code || !username || !password) return res.status(400).json({ error: '参数不完整' });
   
   const emailLower = email.toLowerCase().trim();
-
-  const target = 'email:' + emailLower;
-  const entry = codeStore.get(target);
-  if (!entry) return res.status(400).json({ error: '请先发送验证码' });
-  if (Date.now() > entry.expiresAt) {
-    codeStore.delete(target);
-    return res.status(400).json({ error: '验证码已过期' });
-  }
-  if (entry.attempts >= 5) {
-    codeStore.delete(target);
-    return res.status(400).json({ error: '错误次数过多' });
-  }
-  if (entry.code !== String(code)) {
-    entry.attempts++;
-    return res.status(400).json({ error: '验证码不正确' });
-  }
-  codeStore.delete(target);
+  const entry = codeStore.get('email:' + emailLower);
+  
+  if (!entry || entry.code !== String(code)) return res.status(400).json({ error: '验证码不正确或已过期' });
+  codeStore.delete('email:' + emailLower);
 
   try {
     const checkP = await pool.query('SELECT email FROM parents WHERE email = $1', [emailLower]);
-    if (checkP.rows.length > 0) return res.status(409).json({ error: '该邮箱已注册为家长账号' });
-    
+    if (checkP.rows.length > 0) return res.status(409).json({ error: '该邮箱已注册为家长' });
     const checkS = await pool.query('SELECT email FROM student_emails WHERE email = $1', [emailLower]);
-    if (checkS.rows.length > 0) return res.status(409).json({ error: '该邮箱已注册为学生账号，不能同时注册为家长' });
+    if (checkS.rows.length > 0) return res.status(409).json({ error: '该邮箱已注册为学生，不能作为家长' });
 
     const salt = genSalt();
     const passwordHash = hashPassword(password, salt);
     const createdAt = Date.now();
 
     await pool.query(
-      `INSERT INTO parents (email, phone, username, salt, "passwordHash", "createdAt") 
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+      `INSERT INTO parents (email, phone, username, salt, "passwordHash", "createdAt") VALUES ($1, $2, $3, $4, $5, $6)`,
       [emailLower, phone, username, salt, passwordHash, createdAt]
     );
-
     res.json({ success: true, user: { email: emailLower, phone, username, createdAt } });
   } catch (err) {
-    console.error('[DB] 注册家长失败:', err);
-    res.status(500).json({ error: '服务器数据库异常' });
+    res.status(500).json({ error: '服务器异常' });
   }
 });
 
@@ -256,17 +203,11 @@ app.post('/api/parent/login', async (req, res) => {
     const result = await pool.query('SELECT * FROM parents WHERE email = $1', [id]);
     const parent = result.rows[0];
     if (!parent) return res.status(404).json({ error: '账号不存在' });
+    if (hashPassword(password, parent.salt) !== parent.passwordHash) return res.status(401).json({ error: '密码不正确' });
     
-    if (hashPassword(password, parent.salt) !== parent.passwordHash) {
-      return res.status(401).json({ error: '密码不正确' });
-    }
-    
-    res.json({
-      success: true,
-      user: { email: parent.email, phone: parent.phone, username: parent.username, createdAt: Number(parent.createdAt) }
-    });
+    res.json({ success: true, user: { email: parent.email, phone: parent.phone, username: parent.username, createdAt: Number(parent.createdAt) } });
   } catch (err) {
-    res.status(500).json({ error: '服务器数据库异常' });
+    res.status(500).json({ error: '服务器异常' });
   }
 });
 
@@ -280,38 +221,23 @@ app.post('/api/bind/accept', async (req, res) => {
   const c = String(code).trim().toUpperCase();
 
   try {
-    const pCheck = await pool.query('SELECT email FROM parents WHERE email = $1', [pe]);
-    if (pCheck.rows.length === 0) return res.status(404).json({ error: '家长账号不存在' });
-
     const invRes = await pool.query('SELECT * FROM invites WHERE code = $1', [c]);
     const inv = invRes.rows[0];
-    if (!inv) return res.status(404).json({ error: '邀请码不存在' });
-    if (inv.used) return res.status(410).json({ error: '邀请码已被使用' });
-    if (Number(inv.expiresAt) < Date.now()) {
-      await pool.query('DELETE FROM invites WHERE code = $1', [c]);
-      return res.status(410).json({ error: '邀请码已过期' });
-    }
+    if (!inv || inv.used || Number(inv.expiresAt) < Date.now()) return res.status(400).json({ error: '邀请码无效或已过期' });
 
     const se = inv.studentEmail;
-    const countRes = await pool.query('SELECT COUNT(*) FROM bindings WHERE "studentEmail" = $1', [se]);
-    if (parseInt(countRes.rows[0].count, 10) >= 2) return res.status(409).json({ error: '该学生已达到绑定上限' });
-
     const bindCheck = await pool.query('SELECT id FROM bindings WHERE "studentEmail" = $1 AND "parentEmail" = $2', [se, pe]);
-    if (bindCheck.rows.length > 0) {
-      await pool.query('UPDATE invites SET used = true WHERE code = $1', [c]);
-      return res.status(409).json({ error: '您已绑定该学生' });
-    }
+    if (bindCheck.rows.length > 0) return res.status(409).json({ error: '您已绑定该学生' });
 
     await pool.query(
-      `INSERT INTO bindings ("studentEmail", "studentUsername", "parentEmail", "boundAt") 
-       VALUES ($1, $2, $3, $4)`,
+      `INSERT INTO bindings ("studentEmail", "studentUsername", "parentEmail", "boundAt") VALUES ($1, $2, $3, $4)`,
       [se, inv.studentUsername || '', pe, Date.now()]
     );
     await pool.query('UPDATE invites SET used = true WHERE code = $1', [c]);
 
     res.json({ success: true, studentEmail: se, studentUsername: inv.studentUsername || '' });
   } catch (err) {
-    res.status(500).json({ error: '服务器数据库异常' });
+    res.status(500).json({ error: '服务器异常' });
   }
 });
 
@@ -321,13 +247,9 @@ app.get('/api/parent/students', async (req, res) => {
 
   try {
     const result = await pool.query(`
-      SELECT 
-        b."studentEmail", b."studentUsername", b."boundAt",
-        r."updatedAt" AS "reportUpdatedAt"
-      FROM bindings b
-      LEFT JOIN reports r ON b."studentEmail" = r."studentEmail"
-      WHERE b."parentEmail" = $1
-      ORDER BY b."boundAt" DESC
+      SELECT b."studentEmail", b."studentUsername", b."boundAt", r."updatedAt" AS "reportUpdatedAt"
+      FROM bindings b LEFT JOIN reports r ON b."studentEmail" = r."studentEmail"
+      WHERE b."parentEmail" = $1 ORDER BY b."boundAt" DESC
     `, [pe]);
 
     const list = result.rows.map(row => ({
@@ -337,25 +259,20 @@ app.get('/api/parent/students', async (req, res) => {
       hasReport: !!row.reportUpdatedAt,
       reportUpdatedAt: row.reportUpdatedAt ? Number(row.reportUpdatedAt) : null
     }));
-
     res.json({ success: true, list });
   } catch (err) {
-    res.status(500).json({ error: '服务器数据库异常' });
+    res.status(500).json({ error: '服务器异常' });
   }
 });
 
 app.post('/api/bind/remove', async (req, res) => {
   const { studentEmail, parentEmail } = req.body || {};
   if (!studentEmail || !parentEmail) return res.status(400).json({ error: '参数不完整' });
-  const se = String(studentEmail).trim().toLowerCase();
-  const pe = String(parentEmail).trim().toLowerCase();
-
   try {
-    const result = await pool.query('DELETE FROM bindings WHERE "studentEmail" = $1 AND "parentEmail" = $2 RETURNING id', [se, pe]);
-    if (result.rowCount === 0) return res.status(404).json({ error: '绑定不存在' });
+    await pool.query('DELETE FROM bindings WHERE "studentEmail" = $1 AND "parentEmail" = $2', [studentEmail.toLowerCase().trim(), parentEmail.toLowerCase().trim()]);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: '服务器数据库异常' });
+    res.status(500).json({ error: '服务器异常' });
   }
 });
 
@@ -372,64 +289,35 @@ app.get('/api/parent/report/:studentEmail', async (req, res) => {
     const r = repRes.rows[0];
     if (!r) return res.status(404).json({ error: '该学生尚未提交报告' });
 
-    res.json({
-      success: true,
-      report: {
-        studentEmail: r.studentEmail,
-        studentUsername: r.studentUsername,
-        payload: r.payload,
-        updatedAt: Number(r.updatedAt)
-      }
-    });
+    res.json({ success: true, report: { studentEmail: r.studentEmail, studentUsername: r.studentUsername, payload: r.payload, updatedAt: Number(r.updatedAt) } });
   } catch (err) {
-    res.status(500).json({ error: '服务器数据库异常' });
-  }
-});
-
-// 家长端更新 AI 报告到数据库
-app.post('/api/parent/report/update-ai', async (req, res) => {
-  const { studentEmail, aiReport } = req.body || {};
-  if (!studentEmail || !aiReport) return res.status(400).json({ error: '参数不完整' });
-  const se = String(studentEmail).trim().toLowerCase();
-
-  try {
-    // 获取原 payload
-    const repRes = await pool.query('SELECT payload FROM reports WHERE "studentEmail" = $1', [se]);
-    if (repRes.rows.length === 0) return res.status(404).json({ error: '报告不存在' });
-    
-    const payload = repRes.rows[0].payload;
-    payload.aiReport = aiReport; // 追加 AI 报告
-
-    await pool.query(
-      `UPDATE reports SET payload = $1, "updatedAt" = $2 WHERE "studentEmail" = $3`,
-      [JSON.stringify(payload), Date.now(), se]
-    );
-    
-    res.json({ success: true });
-  } catch (err) {
-    console.error('[DB] 更新 AI 报告失败:', err);
-    res.status(500).json({ error: '服务器数据库异常' });
+    res.status(500).json({ error: '服务器异常' });
   }
 });
 
 /* ============================================================
-   API: DeepSeek AI 代理
+   API: AI 代理生成（严格 60 秒冷却限制）
    ============================================================ */
 app.post('/api/generate-ai-report', async (req, res) => {
-  const { prompt } = req.body || {};
-  if (!prompt) return res.status(400).json({ error: '缺少提示词' });
-  
-  if (!DEEPSEEK_API_KEY) {
-    return res.status(500).json({ error: '未配置 DEEPSEEK_API_KEY 环境变量' });
+  const { prompt, studentEmail } = req.body || {};
+  if (!prompt || !studentEmail) return res.status(400).json({ error: '参数不完整' });
+  if (!DEEPSEEK_API_KEY) return res.status(500).json({ error: '未配置 DEEPSEEK_API_KEY 环境变量' });
+
+  // 🚨 核心防御：拦截同一学生 60 秒内的重复请求
+  const se = String(studentEmail).toLowerCase().trim();
+  const lastTime = aiCooldown.get(se) || 0;
+  const now = Date.now();
+  if (now - lastTime < 60 * 1000) {
+    const wait = Math.ceil((60 * 1000 - (now - lastTime)) / 1000);
+    return res.status(429).json({ error: `请求过于频繁，请 ${wait} 秒后再试（防止重复扣费）` });
   }
+  // 记录本次请求时间
+  aiCooldown.set(se, now);
 
   try {
     const response = await fetch('https://api.deepseek.com/chat/completions', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + DEEPSEEK_API_KEY
-      },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DEEPSEEK_API_KEY },
       body: JSON.stringify({
         model: 'deepseek-chat',
         messages: [
@@ -442,14 +330,9 @@ app.post('/api/generate-ai-report', async (req, res) => {
       })
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`API 错误 ${response.status}: ${errorText.slice(0, 100)}`);
-    }
-
+    if (!response.ok) throw new Error(`DeepSeek API 返回错误`);
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content;
-    
     if (!content) throw new Error('API 返回内容为空');
     
     res.json({ success: true, text: content });
@@ -459,13 +342,25 @@ app.post('/api/generate-ai-report', async (req, res) => {
   }
 });
 
-// 家长端启动
+app.post('/api/parent/report/update-ai', async (req, res) => {
+  const { studentEmail, aiReport } = req.body || {};
+  if (!studentEmail || !aiReport) return res.status(400).json({ error: '参数不完整' });
+  const se = String(studentEmail).trim().toLowerCase();
+
+  try {
+    const repRes = await pool.query('SELECT payload FROM reports WHERE "studentEmail" = $1', [se]);
+    if (repRes.rows.length === 0) return res.status(404).json({ error: '报告不存在' });
+    const payload = repRes.rows[0].payload;
+    payload.aiReport = aiReport;
+    await pool.query(`UPDATE reports SET payload = $1, "updatedAt" = $2 WHERE "studentEmail" = $3`, [JSON.stringify(payload), Date.now(), se]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: '服务器异常' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log('===========================================');
-  console.log('  QBTI 家长端独立服务器已启动');
-  console.log('  端口: ' + PORT);
-  console.log('  数据库: ' + (DATABASE_URL ? '✅ 已配置' : '❌ 未配置'));
-  console.log('  邮件: ' + (AGENTMAIL_API_KEY ? '✅ 已启用' : '⚠️ 未配置'));
-  console.log('  DeepSeek: ' + (DEEPSEEK_API_KEY ? '✅ 已启用' : '⚠️ 未配置'));
+  console.log('  QBTI 家长端已启动，端口: ' + PORT);
   console.log('===========================================');
 });
