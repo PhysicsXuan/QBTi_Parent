@@ -1,5 +1,5 @@
 /* ============================================================
-   QParent —— 独立家长端逻辑（解绑版 + 全独立API + 真实发信）
+   QParent —— 独立家长端逻辑（解绑 + 真实发信 + 直接生成AI）
    ============================================================ */
 (function(){
   'use strict';
@@ -224,7 +224,6 @@
     btn.textContent = '发送中…';
 
     try {
-      // 1. 检查该邮箱是否已被学生端注册
       const checkRes = await fetch(API_BASE + '/api/check-email?email=' + encodeURIComponent(data.email) + '&role=parent');
       const checkData = await checkRes.json();
       if (!checkData.available) {
@@ -235,7 +234,6 @@
          return;
       }
 
-      // 2. 请求后端发送验证码
       const res = await fetch(API_BASE + '/api/send-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -636,7 +634,7 @@
   }
 
   /* ============================================================
-     报告展示
+     报告展示 & AI 直接生成
      ============================================================ */
   function setAccent(quantumState){
     const map = { good:[80,220,140], danger:[235,65,75], superposition:[90,140,245] };
@@ -760,6 +758,15 @@
       </div>`;
     }).join('');
 
+    // 判断是否需要家长端直接生成
+    const needGenerate = !aiReportText;
+    const aiActionHTML = needGenerate ? `
+      <div style="text-align:center;padding:20px 0;">
+        <div style="color:var(--muted);font-size:13px;margin-bottom:14px;">孩子尚未生成 AI 报告，家长可在此直接生成</div>
+        <button class="btn primary sm" id="btnGenAI" data-student="${escapeHTML(extraData.studentEmail)}">✨ 直接生成 AI 报告</button>
+      </div>
+    ` : renderMD(aiReportText);
+
     app.innerHTML = `
       <button class="back-btn" id="btnBack">← 返回列表</button>
       
@@ -788,12 +795,8 @@
       <div class="card">${dimsHTML}</div>
 
       <div class="title">AI 引导报告</div>
-      <div class="card ai-body">
-        ${aiReportText ? renderMD(aiReportText) : `
-          <div style="text-align:center;padding:20px 0;color:var(--muted);font-size:13px;line-height:1.8;">
-            孩子尚未生成 AI 报告。<br>请提醒孩子在学生端点击「生成报告」。
-          </div>
-        `}
+      <div class="card ai-body" id="aiBody">
+        ${aiActionHTML}
       </div>
       
       <div class="result-actions">
@@ -803,6 +806,50 @@
     
     $('btnBack').addEventListener('click', renderDashboard);
     $('btnBackBottom').addEventListener('click', renderDashboard);
+
+    if(needGenerate && $('btnGenAI')){
+      $('btnGenAI').addEventListener('click', async () => {
+        const btn = $('btnGenAI');
+        const studentEmail = btn.dataset.student;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span>生成中…';
+        $('aiBody').innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);"><span class="spinner"></span>正在解析孩子的波函数与作答真实性…</div>';
+        
+        try {
+          // 生成 Prompt（复用了学生端的核心算法）
+          const prompt = Q.buildPrompt(res, validity);
+          
+          // 请求家长端自己的后端
+          const apiRes = await fetch(API_BASE + '/api/generate-ai-report', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt })
+          });
+          
+          const apiData = await apiRes.json();
+          if(!apiRes.ok || !apiData.success) {
+            throw new Error(apiData.error || '生成失败');
+          }
+
+          const text = apiData.text;
+          
+          // 更新到数据库
+          await fetch(API_BASE + '/api/parent/report/update-ai', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ studentEmail, aiReport: text })
+          });
+          
+          $('aiBody').innerHTML = renderMD(text);
+        } catch(err){
+          console.error('AI 生成异常:', err);
+          const msg = String(err.message || err);
+          $('aiBody').innerHTML = `<div style="color:#FFD98A;font-size:13px;padding:20px;text-align:center;">生成失败：${escapeHTML(msg)}</div>`;
+        } finally {
+          if(btn) { btn.disabled = false; btn.textContent = '重新生成'; }
+        }
+      });
+    }
   }
 
   function init(){

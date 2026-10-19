@@ -1,5 +1,5 @@
 /* ============================================================
-   QBTI 家长端后端服务器（完全独立版 + 真实发信）
+   QBTI 家长端后端服务器（完全独立版 + 真实发信 + DeepSeek代理）
    ============================================================ */
 
 const express = require('express');
@@ -16,6 +16,7 @@ app.use(express.static(__dirname));
 /* ---------- 配置 ---------- */
 const DATABASE_URL = process.env.DATABASE_URL;
 const AGENTMAIL_API_KEY = process.env.AGENTMAIL_API_KEY;
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY; // 👈 新增
 const AGENTMAIL_BASE = 'https://api.agentmail.to/v0';
 
 if (!DATABASE_URL) {
@@ -27,6 +28,11 @@ if (!AGENTMAIL_API_KEY) {
   console.log('⚠️ 未配置 AGENTMAIL_API_KEY，验证码将打印在控制台');
 } else {
   console.log('✅ AgentMail 发信已配置');
+}
+if (!DEEPSEEK_API_KEY) {
+  console.log('⚠️ 未配置 DEEPSEEK_API_KEY，家长将无法在后台直接生成报告');
+} else {
+  console.log('✅ DeepSeek API 已配置');
 }
 
 /* ---------- 数据库连接池 ---------- */
@@ -130,7 +136,7 @@ setInterval(() => {
 }, 60 * 1000);
 
 /* ============================================================
-   API: 发送验证码（家长端用）
+   API: 发送验证码
    ============================================================ */
 app.post('/api/send-code', async (req, res) => {
   const { email, phone } = req.body || {};
@@ -177,7 +183,6 @@ app.get('/api/check-email', async (req, res) => {
   const targetEmail = email.toLowerCase().trim();
 
   try {
-    // 家长注册，检查学生表
     if (role === 'parent') {
       const r = await pool.query('SELECT email FROM student_emails WHERE email = $1', [targetEmail]);
       if (r.rows.length > 0) {
@@ -201,7 +206,6 @@ app.post('/api/parent/register', async (req, res) => {
   
   const emailLower = email.toLowerCase().trim();
 
-  // 验证码校验
   const target = 'email:' + emailLower;
   const entry = codeStore.get(target);
   if (!entry) return res.status(400).json({ error: '请先发送验证码' });
@@ -382,6 +386,79 @@ app.get('/api/parent/report/:studentEmail', async (req, res) => {
   }
 });
 
+// 家长端更新 AI 报告到数据库
+app.post('/api/parent/report/update-ai', async (req, res) => {
+  const { studentEmail, aiReport } = req.body || {};
+  if (!studentEmail || !aiReport) return res.status(400).json({ error: '参数不完整' });
+  const se = String(studentEmail).trim().toLowerCase();
+
+  try {
+    // 获取原 payload
+    const repRes = await pool.query('SELECT payload FROM reports WHERE "studentEmail" = $1', [se]);
+    if (repRes.rows.length === 0) return res.status(404).json({ error: '报告不存在' });
+    
+    const payload = repRes.rows[0].payload;
+    payload.aiReport = aiReport; // 追加 AI 报告
+
+    await pool.query(
+      `UPDATE reports SET payload = $1, "updatedAt" = $2 WHERE "studentEmail" = $3`,
+      [JSON.stringify(payload), Date.now(), se]
+    );
+    
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[DB] 更新 AI 报告失败:', err);
+    res.status(500).json({ error: '服务器数据库异常' });
+  }
+});
+
+/* ============================================================
+   API: DeepSeek AI 代理
+   ============================================================ */
+app.post('/api/generate-ai-report', async (req, res) => {
+  const { prompt } = req.body || {};
+  if (!prompt) return res.status(400).json({ error: '缺少提示词' });
+  
+  if (!DEEPSEEK_API_KEY) {
+    return res.status(500).json({ error: '未配置 DEEPSEEK_API_KEY 环境变量' });
+  }
+
+  try {
+    const response = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + DEEPSEEK_API_KEY
+      },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: '你是一位擅长用隐喻理解青少年学习状态的教育引导顾问，语气温暖、具体、不评判。你的报告面向家长，帮助家长理解孩子，而不是评判孩子。' },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.85,
+        max_tokens: 2400,
+        stream: false
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`API 错误 ${response.status}: ${errorText.slice(0, 100)}`);
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content;
+    
+    if (!content) throw new Error('API 返回内容为空');
+    
+    res.json({ success: true, text: content });
+  } catch (err) {
+    console.error('[DeepSeek] 代理请求失败:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 家长端启动
 app.listen(PORT, () => {
   console.log('===========================================');
@@ -389,5 +466,6 @@ app.listen(PORT, () => {
   console.log('  端口: ' + PORT);
   console.log('  数据库: ' + (DATABASE_URL ? '✅ 已配置' : '❌ 未配置'));
   console.log('  邮件: ' + (AGENTMAIL_API_KEY ? '✅ 已启用' : '⚠️ 未配置'));
+  console.log('  DeepSeek: ' + (DEEPSEEK_API_KEY ? '✅ 已启用' : '⚠️ 未配置'));
   console.log('===========================================');
 });
