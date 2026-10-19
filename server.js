@@ -1,5 +1,5 @@
 /* ============================================================
-   QBTI 家长端后端服务器（完全独立版）
+   QBTI 家长端后端服务器（完全独立版 + 真实发信）
    ============================================================ */
 
 const express = require('express');
@@ -11,17 +11,22 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '4mb' }));
-
-// 托管家长端静态页面
 app.use(express.static(__dirname));
 
 /* ---------- 配置 ---------- */
 const DATABASE_URL = process.env.DATABASE_URL;
+const AGENTMAIL_API_KEY = process.env.AGENTMAIL_API_KEY;
+const AGENTMAIL_BASE = 'https://api.agentmail.to/v0';
 
 if (!DATABASE_URL) {
   console.log('❌ 严重警告：未配置 DATABASE_URL！家长端将无法连接数据库。');
 } else {
   console.log('✅ PostgreSQL 连接字符串已配置');
+}
+if (!AGENTMAIL_API_KEY) {
+  console.log('⚠️ 未配置 AGENTMAIL_API_KEY，验证码将打印在控制台');
+} else {
+  console.log('✅ AgentMail 发信已配置');
 }
 
 /* ---------- 数据库连接池 ---------- */
@@ -43,7 +48,128 @@ function genSalt() {
 }
 
 /* ============================================================
-   API: 邮箱角色排他检查（家长端调用）
+   AgentMail 发信逻辑
+   ============================================================ */
+let inboxId = null;
+
+async function ensureInbox() {
+  if (!AGENTMAIL_API_KEY) return null;
+  if (inboxId) return inboxId;
+  try {
+    const listRes = await fetch(AGENTMAIL_BASE + '/inboxes', {
+      headers: { 'Authorization': 'Bearer ' + AGENTMAIL_API_KEY }
+    });
+    let inboxes = [];
+    try {
+      const listData = await listRes.json();
+      inboxes = listData.inboxes || listData.data || (Array.isArray(listData) ? listData : []);
+    } catch (e) {}
+    if (inboxes.length > 0) {
+      inboxId = inboxes[0].inboxId || inboxes[0].id || inboxes[0].inbox_id;
+      return inboxId;
+    }
+    const createRes = await fetch(AGENTMAIL_BASE + '/inboxes', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + AGENTMAIL_API_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({})
+    });
+    if (!createRes.ok) return null;
+    const created = await createRes.json();
+    inboxId = created.inboxId || created.id || created.inbox_id;
+    return inboxId;
+  } catch (err) {
+    console.error('[AgentMail] ensureInbox 异常:', err.message);
+    return null;
+  }
+}
+
+async function sendCodeEmail(to, code) {
+  if (!AGENTMAIL_API_KEY) return { ok: false };
+  const inbox = await ensureInbox();
+  if (!inbox) return { ok: false };
+  try {
+    const sendRes = await fetch(
+      AGENTMAIL_BASE + '/inboxes/' + inbox + '/messages/send',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + AGENTMAIL_API_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          to,
+          subject: '【QBTI 家长端】你的验证码',
+          html: [
+            '<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#0B0D1C;color:#E9EBFF;border-radius:16px;">',
+            '  <h2 style="color:#fff;margin-bottom:16px;">家长端邮箱验证</h2>',
+            '  <p style="color:#8B90B8;line-height:1.6;">你的 QBTI 家长端验证码：</p>',
+            '  <div style="font-size:36px;font-weight:800;letter-spacing:8px;color:#FF8A48;margin:24px 0;text-align:center;">' + code + '</div>',
+            '  <p style="color:#8B90B8;font-size:13px;">5 分钟内有效，请勿泄露。</p>',
+            '</div>'
+          ].join('\n')
+        })
+      }
+    );
+    return { ok: sendRes.ok };
+  } catch (err) {
+    console.error('[AgentMail] 发送异常:', err.message);
+    return { ok: false };
+  }
+}
+
+/* ---------- 验证码内存存储 ---------- */
+const codeStore = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of codeStore) {
+    if (val.expiresAt < now && (now - val.lastSentAt) > 10 * 60 * 1000) codeStore.delete(key);
+  }
+}, 60 * 1000);
+
+/* ============================================================
+   API: 发送验证码（家长端用）
+   ============================================================ */
+app.post('/api/send-code', async (req, res) => {
+  const { email, phone } = req.body || {};
+  const target = email ? 'email:' + email.toLowerCase().trim()
+                     : phone ? 'phone:' + phone.trim() : null;
+  if (!target) return res.status(400).json({ error: '缺少邮箱或手机号' });
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: '邮箱格式不正确' });
+  }
+
+  const now = Date.now();
+  const existing = codeStore.get(target);
+  if (existing && (now - existing.lastSentAt) < 60 * 1000) {
+    const wait = Math.ceil((60 * 1000 - (now - existing.lastSentAt)) / 1000);
+    return res.status(429).json({ error: '请 ' + wait + ' 秒后再试' });
+  }
+
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  codeStore.set(target, {
+    code, expiresAt: now + 5 * 60 * 1000, attempts: 0, lastSentAt: now
+  });
+
+  console.log(`[验证码] ${target} -> ${code}`);
+
+  if (email && AGENTMAIL_API_KEY) {
+    const r = await sendCodeEmail(email, code);
+    if (!r.ok) return res.status(500).json({ error: '邮件发送失败' });
+  }
+
+  const isDev = !AGENTMAIL_API_KEY;
+  res.json({
+    success: true,
+    message: isDev ? '验证码已生成，请查看服务端控制台' : '验证码已发送到你的邮箱',
+    devCode: isDev ? code : undefined
+  });
+});
+
+/* ============================================================
+   API: 邮箱角色排他检查
    ============================================================ */
 app.get('/api/check-email', async (req, res) => {
   const { email, role } = req.query;
@@ -51,7 +177,7 @@ app.get('/api/check-email', async (req, res) => {
   const targetEmail = email.toLowerCase().trim();
 
   try {
-    // 如果当前是家长在注册，检查学生表里是否有这个人
+    // 家长注册，检查学生表
     if (role === 'parent') {
       const r = await pool.query('SELECT email FROM student_emails WHERE email = $1', [targetEmail]);
       if (r.rows.length > 0) {
@@ -68,14 +194,30 @@ app.get('/api/check-email', async (req, res) => {
    API: 家长注册 / 登录
    ============================================================ */
 app.post('/api/parent/register', async (req, res) => {
-  // 注意：因为没有独立发信服务，验证码校验需要借用学生端，或者在这里放开（为简单起见，此独立版假设验证码已在前端或其他地方校验）
-  // 为了完全独立运行，这里简化了验证码校验逻辑（如果要用邮箱，需在此处重新接入 AgentMail）
   const { email, phone, code, username, password } = req.body || {};
-  if (!email || !phone || !username || !password) {
+  if (!email || !phone || !code || !username || !password) {
     return res.status(400).json({ error: '参数不完整' });
   }
-
+  
   const emailLower = email.toLowerCase().trim();
+
+  // 验证码校验
+  const target = 'email:' + emailLower;
+  const entry = codeStore.get(target);
+  if (!entry) return res.status(400).json({ error: '请先发送验证码' });
+  if (Date.now() > entry.expiresAt) {
+    codeStore.delete(target);
+    return res.status(400).json({ error: '验证码已过期' });
+  }
+  if (entry.attempts >= 5) {
+    codeStore.delete(target);
+    return res.status(400).json({ error: '错误次数过多' });
+  }
+  if (entry.code !== String(code)) {
+    entry.attempts++;
+    return res.status(400).json({ error: '验证码不正确' });
+  }
+  codeStore.delete(target);
 
   try {
     const checkP = await pool.query('SELECT email FROM parents WHERE email = $1', [emailLower]);
@@ -246,5 +388,6 @@ app.listen(PORT, () => {
   console.log('  QBTI 家长端独立服务器已启动');
   console.log('  端口: ' + PORT);
   console.log('  数据库: ' + (DATABASE_URL ? '✅ 已配置' : '❌ 未配置'));
+  console.log('  邮件: ' + (AGENTMAIL_API_KEY ? '✅ 已启用' : '⚠️ 未配置'));
   console.log('===========================================');
 });

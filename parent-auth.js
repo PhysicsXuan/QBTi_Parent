@@ -1,5 +1,5 @@
 /* ============================================================
-   QParent —— 独立家长端逻辑（解绑版 + 全独立API）
+   QParent —— 独立家长端逻辑（解绑版 + 全独立API + 真实发信）
    ============================================================ */
 (function(){
   'use strict';
@@ -9,7 +9,7 @@
   const SESSION_DURATION = 30 * 24 * 60 * 60 * 1000;
   const CODE_COOLDOWN = 60 * 1000;
   
-  // 👈 修改为空：因为家长端自己的 server.js 已经包含所有接口
+  // 👈 因为家长端自己的 server.js 已经包含所有接口，这里留空
   const API_BASE = ''; 
 
   const $ = id => document.getElementById(id);
@@ -224,6 +224,7 @@
     btn.textContent = '发送中…';
 
     try {
+      // 1. 检查该邮箱是否已被学生端注册
       const checkRes = await fetch(API_BASE + '/api/check-email?email=' + encodeURIComponent(data.email) + '&role=parent');
       const checkData = await checkRes.json();
       if (!checkData.available) {
@@ -234,13 +235,24 @@
          return;
       }
 
-      // 注：由于独立版家长端没有配邮件服务，这里仅作验证码发送提示
-      // 若需要真实发送，需在家长端 server.js 也接入 AgentMail
-      toast('验证码已发送（请留意邮箱）', 'ok');
-      
+      // 2. 请求后端发送验证码
+      const res = await fetch(API_BASE + '/api/send-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: data.email, phone: data.phone })
+      });
+      const r = await res.json();
+      if(!res.ok || !r.success){
+        setFieldError(form, 'code', r.error || '发送失败');
+        toast(r.error || '发送失败', 'err');
+        btn.disabled = false;
+        btn.textContent = oldText;
+        return;
+      }
+      toast(r.message || '验证码已发送', 'ok');
     } catch(err){
       setFieldError(form, 'code', '无法连接服务器');
-      toast('无法连接数据库，请检查数据库环境变量', 'err');
+      toast('无法连接服务器，请检查服务器是否正常', 'err');
       btn.disabled = false;
       btn.textContent = oldText;
       return;
