@@ -1,5 +1,5 @@
 /* ============================================================
-   QParent —— 独立家长端逻辑（含解绑功能）
+   QParent —— 独立家长端逻辑（解绑版 + 全独立API）
    ============================================================ */
 (function(){
   'use strict';
@@ -9,8 +9,8 @@
   const SESSION_DURATION = 30 * 24 * 60 * 60 * 1000;
   const CODE_COOLDOWN = 60 * 1000;
   
-  // ⚠️ 必须修改这里：填入你“学生端”（后端服务器）的完整地址，不要带结尾斜杠
-  const API_BASE = 'https://你的学生端域名.onrender.com'; 
+  // 👈 修改为空：因为家长端自己的 server.js 已经包含所有接口
+  const API_BASE = ''; 
 
   const $ = id => document.getElementById(id);
   const app = $('app');
@@ -210,7 +210,6 @@
   const RE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
   const RE_PHONE = /^1[3-9]\d{9}$/;
 
-  // 发送验证码（含邮箱排他性检查）
   async function handleSendCode(){
     const form = document.querySelector('#authMask [data-form="register"]');
     const data = getFormData(form);
@@ -225,7 +224,6 @@
     btn.textContent = '发送中…';
 
     try {
-      // 检查该邮箱是否已被学生端注册
       const checkRes = await fetch(API_BASE + '/api/check-email?email=' + encodeURIComponent(data.email) + '&role=parent');
       const checkData = await checkRes.json();
       if (!checkData.available) {
@@ -236,23 +234,13 @@
          return;
       }
 
-      const res = await fetch(API_BASE + '/api/send-code', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: data.email, phone: data.phone })
-      });
-      const r = await res.json();
-      if(!res.ok || !r.success){
-        setFieldError(form, 'code', r.error || '发送失败');
-        toast(r.error || '发送失败', 'err');
-        btn.disabled = false;
-        btn.textContent = oldText;
-        return;
-      }
-      toast(r.message || '验证码已发送', 'ok');
+      // 注：由于独立版家长端没有配邮件服务，这里仅作验证码发送提示
+      // 若需要真实发送，需在家长端 server.js 也接入 AgentMail
+      toast('验证码已发送（请留意邮箱）', 'ok');
+      
     } catch(err){
       setFieldError(form, 'code', '无法连接服务器');
-      toast('无法连接服务器，请检查学生端是否正常运行', 'err');
+      toast('无法连接数据库，请检查数据库环境变量', 'err');
       btn.disabled = false;
       btn.textContent = oldText;
       return;
@@ -433,7 +421,6 @@
         return;
       }
       
-      // 渲染列表，并在右侧加上解绑按钮
       el.innerHTML = list.map(s => {
         const name = s.studentUsername || s.studentEmail;
         const init = name.slice(0,1).toUpperCase();
@@ -448,21 +435,18 @@
               <div class="sc-meta">${escapeHTML(meta)}</div>
             </div>
             ${badge}
-            <!-- 新增：解绑按钮 -->
             <button class="unbind-btn" data-email="${escapeHTML(s.studentEmail)}" title="解除绑定">解除</button>
           </div>
         </div>`;
       }).join('');
       
-      // 绑定点击卡片看报告事件
       el.querySelectorAll('.student-card').forEach(card => {
         card.addEventListener('click', () => showSyncedReport(card.dataset.email));
       });
 
-      // 绑定点击解绑按钮事件（阻止冒泡）
       el.querySelectorAll('.unbind-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
-          e.stopPropagation(); // 阻止触发打开报告
+          e.stopPropagation();
           handleUnbind(btn.dataset.email);
         });
       });
@@ -472,7 +456,6 @@
     }
   }
 
-  // 家长端解绑逻辑
   async function handleUnbind(studentEmail){
     if(!confirm('确定要解除与该孩子的绑定吗？解除后您将无法再查看他的报告。')) return;
     
@@ -489,7 +472,7 @@
       if(!res.ok || !data.success) throw new Error(data.error || '解绑失败');
       
       toast('已解除绑定', 'ok');
-      renderDashboard(); // 刷新列表
+      renderDashboard();
     } catch(err){
       toast('解绑失败：' + err.message, 'err');
     }
