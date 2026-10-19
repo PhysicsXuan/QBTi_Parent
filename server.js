@@ -1,5 +1,5 @@
 /* ============================================================
-   QBTI 家长端后端服务器（完全独立版 + 防刷限流版）
+   QBTI 家长端后端服务器（完全独立版 + 跨域 + 真实发信 + AI代理 + 限流 + 重置密码）
    ============================================================ */
 
 const express = require('express');
@@ -11,9 +11,20 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '4mb' }));
+
+// 跨域配置
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
+
+// 托管静态页面
 app.use(express.static(__dirname));
 
-/* ---------- 配置 ---------- */
+/* ---------- 环境变量配置 ---------- */
 const DATABASE_URL = process.env.DATABASE_URL;
 const AGENTMAIL_API_KEY = process.env.AGENTMAIL_API_KEY;
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
@@ -95,7 +106,14 @@ async function sendCodeEmail(to, code) {
         body: JSON.stringify({
           to,
           subject: '【QBTI 家长端】你的验证码',
-          html: '<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#0B0D1C;color:#E9EBFF;border-radius:16px;"><h2 style="color:#fff;">家长端验证</h2><div style="font-size:36px;font-weight:800;color:#FF8A48;text-align:center;">' + code + '</div></div>'
+          html: [
+            '<div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#0B0D1C;color:#E9EBFF;border-radius:16px;">',
+            '  <h2 style="color:#fff;margin-bottom:16px;">家长端邮箱验证</h2>',
+            '  <p style="color:#8B90B8;line-height:1.6;">你的 QBTI 家长端验证码：</p>',
+            '  <div style="font-size:36px;font-weight:800;letter-spacing:8px;color:#FF8A48;margin:24px 0;text-align:center;">' + code + '</div>',
+            '  <p style="color:#8B90B8;font-size:13px;">5 分钟内有效，请勿泄露。</p>',
+            '</div>'
+          ].join('\n')
         })
       }
     );
@@ -114,13 +132,13 @@ setInterval(() => {
   }
 }, 60 * 1000);
 
-// ============================================================
-// 🚨 新增：AI 接口防刷限流（记录每个学生的最后请求时间）
-// ============================================================
+/* ============================================================
+   AI 接口防刷限流
+   ============================================================ */
 const aiCooldown = new Map(); 
 
 /* ============================================================
-   API: 发送验证码
+   API: 发送验证码（注册 / 重置密码共用）
    ============================================================ */
 app.post('/api/send-code', async (req, res) => {
   const { email, phone } = req.body || {};
@@ -153,7 +171,7 @@ app.get('/api/check-email', async (req, res) => {
   try {
     if (role === 'parent') {
       const r = await pool.query('SELECT email FROM student_emails WHERE email = $1', [email.toLowerCase().trim()]);
-      if (r.rows.length > 0) return res.json({ available: false, msg: '该邮箱已注册为学生账号' });
+      if (r.rows.length > 0) return res.json({ available: false, msg: '该邮箱已注册为学生账号，请勿重复注册' });
     }
     res.json({ available: true });
   } catch(err) {
@@ -162,7 +180,7 @@ app.get('/api/check-email', async (req, res) => {
 });
 
 /* ============================================================
-   API: 家长注册 / 登录
+   API: 家长注册 / 登录 / 重置密码
    ============================================================ */
 app.post('/api/parent/register', async (req, res) => {
   const { email, phone, code, username, password } = req.body || {};
@@ -176,9 +194,9 @@ app.post('/api/parent/register', async (req, res) => {
 
   try {
     const checkP = await pool.query('SELECT email FROM parents WHERE email = $1', [emailLower]);
-    if (checkP.rows.length > 0) return res.status(409).json({ error: '该邮箱已注册为家长' });
+    if (checkP.rows.length > 0) return res.status(409).json({ error: '该邮箱已注册为家长账号' });
     const checkS = await pool.query('SELECT email FROM student_emails WHERE email = $1', [emailLower]);
-    if (checkS.rows.length > 0) return res.status(409).json({ error: '该邮箱已注册为学生，不能作为家长' });
+    if (checkS.rows.length > 0) return res.status(409).json({ error: '该邮箱已注册为学生账号，不能同时注册为家长' });
 
     const salt = genSalt();
     const passwordHash = hashPassword(password, salt);
@@ -190,7 +208,7 @@ app.post('/api/parent/register', async (req, res) => {
     );
     res.json({ success: true, user: { email: emailLower, phone, username, createdAt } });
   } catch (err) {
-    res.status(500).json({ error: '服务器异常' });
+    res.status(500).json({ error: '服务器数据库异常' });
   }
 });
 
@@ -207,7 +225,49 @@ app.post('/api/parent/login', async (req, res) => {
     
     res.json({ success: true, user: { email: parent.email, phone: parent.phone, username: parent.username, createdAt: Number(parent.createdAt) } });
   } catch (err) {
-    res.status(500).json({ error: '服务器异常' });
+    res.status(500).json({ error: '服务器数据库异常' });
+  }
+});
+
+app.post('/api/parent/reset-password', async (req, res) => {
+  const { email, code, newPassword } = req.body || {};
+  if (!email || !code || !newPassword) return res.status(400).json({ error: '参数不完整' });
+  if (newPassword.length < 6) return res.status(400).json({ error: '密码至少 6 位' });
+
+  const emailLower = email.toLowerCase().trim();
+  const target = 'email:' + emailLower;
+
+  const entry = codeStore.get(target);
+  if (!entry) return res.status(400).json({ error: '请先发送验证码' });
+  if (Date.now() > entry.expiresAt) {
+    codeStore.delete(target);
+    return res.status(400).json({ error: '验证码已过期' });
+  }
+  if (entry.attempts >= 5) {
+    codeStore.delete(target);
+    return res.status(400).json({ error: '错误次数过多' });
+  }
+  if (entry.code !== String(code)) {
+    entry.attempts++;
+    return res.status(400).json({ error: '验证码不正确' });
+  }
+  codeStore.delete(target);
+
+  try {
+    const checkP = await pool.query('SELECT email FROM parents WHERE email = $1', [emailLower]);
+    if (checkP.rows.length === 0) return res.status(404).json({ error: '该邮箱未注册家长账号' });
+
+    const salt = genSalt();
+    const passwordHash = hashPassword(newPassword, salt);
+
+    await pool.query(
+      `UPDATE parents SET salt = $1, "passwordHash" = $2 WHERE email = $3`,
+      [salt, passwordHash, emailLower]
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: '服务器数据库异常' });
   }
 });
 
@@ -221,13 +281,27 @@ app.post('/api/bind/accept', async (req, res) => {
   const c = String(code).trim().toUpperCase();
 
   try {
+    const pCheck = await pool.query('SELECT email FROM parents WHERE email = $1', [pe]);
+    if (pCheck.rows.length === 0) return res.status(404).json({ error: '家长账号不存在' });
+
     const invRes = await pool.query('SELECT * FROM invites WHERE code = $1', [c]);
     const inv = invRes.rows[0];
-    if (!inv || inv.used || Number(inv.expiresAt) < Date.now()) return res.status(400).json({ error: '邀请码无效或已过期' });
+    if (!inv) return res.status(404).json({ error: '邀请码不存在' });
+    if (inv.used) return res.status(410).json({ error: '邀请码已被使用' });
+    if (Number(inv.expiresAt) < Date.now()) {
+      await pool.query('DELETE FROM invites WHERE code = $1', [c]);
+      return res.status(410).json({ error: '邀请码已过期' });
+    }
 
     const se = inv.studentEmail;
+    const countRes = await pool.query('SELECT COUNT(*) FROM bindings WHERE "studentEmail" = $1', [se]);
+    if (parseInt(countRes.rows[0].count, 10) >= 2) return res.status(409).json({ error: '该学生已达到绑定上限' });
+
     const bindCheck = await pool.query('SELECT id FROM bindings WHERE "studentEmail" = $1 AND "parentEmail" = $2', [se, pe]);
-    if (bindCheck.rows.length > 0) return res.status(409).json({ error: '您已绑定该学生' });
+    if (bindCheck.rows.length > 0) {
+      await pool.query('UPDATE invites SET used = true WHERE code = $1', [c]);
+      return res.status(409).json({ error: '您已绑定该学生' });
+    }
 
     await pool.query(
       `INSERT INTO bindings ("studentEmail", "studentUsername", "parentEmail", "boundAt") VALUES ($1, $2, $3, $4)`,
@@ -237,7 +311,7 @@ app.post('/api/bind/accept', async (req, res) => {
 
     res.json({ success: true, studentEmail: se, studentUsername: inv.studentUsername || '' });
   } catch (err) {
-    res.status(500).json({ error: '服务器异常' });
+    res.status(500).json({ error: '服务器数据库异常' });
   }
 });
 
@@ -261,7 +335,7 @@ app.get('/api/parent/students', async (req, res) => {
     }));
     res.json({ success: true, list });
   } catch (err) {
-    res.status(500).json({ error: '服务器异常' });
+    res.status(500).json({ error: '服务器数据库异常' });
   }
 });
 
@@ -272,7 +346,7 @@ app.post('/api/bind/remove', async (req, res) => {
     await pool.query('DELETE FROM bindings WHERE "studentEmail" = $1 AND "parentEmail" = $2', [studentEmail.toLowerCase().trim(), parentEmail.toLowerCase().trim()]);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: '服务器异常' });
+    res.status(500).json({ error: '服务器数据库异常' });
   }
 });
 
@@ -291,7 +365,7 @@ app.get('/api/parent/report/:studentEmail', async (req, res) => {
 
     res.json({ success: true, report: { studentEmail: r.studentEmail, studentUsername: r.studentUsername, payload: r.payload, updatedAt: Number(r.updatedAt) } });
   } catch (err) {
-    res.status(500).json({ error: '服务器异常' });
+    res.status(500).json({ error: '服务器数据库异常' });
   }
 });
 
@@ -303,15 +377,15 @@ app.post('/api/generate-ai-report', async (req, res) => {
   if (!prompt || !studentEmail) return res.status(400).json({ error: '参数不完整' });
   if (!DEEPSEEK_API_KEY) return res.status(500).json({ error: '未配置 DEEPSEEK_API_KEY 环境变量' });
 
-  // 🚨 核心防御：拦截同一学生 60 秒内的重复请求
   const se = String(studentEmail).toLowerCase().trim();
   const lastTime = aiCooldown.get(se) || 0;
   const now = Date.now();
+  
+  // 60秒防刷限制
   if (now - lastTime < 60 * 1000) {
     const wait = Math.ceil((60 * 1000 - (now - lastTime)) / 1000);
     return res.status(429).json({ error: `请求过于频繁，请 ${wait} 秒后再试（防止重复扣费）` });
   }
-  // 记录本次请求时间
   aiCooldown.set(se, now);
 
   try {
@@ -355,12 +429,17 @@ app.post('/api/parent/report/update-ai', async (req, res) => {
     await pool.query(`UPDATE reports SET payload = $1, "updatedAt" = $2 WHERE "studentEmail" = $3`, [JSON.stringify(payload), Date.now(), se]);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: '服务器异常' });
+    res.status(500).json({ error: '服务器数据库异常' });
   }
 });
 
+// 启动服务
 app.listen(PORT, () => {
   console.log('===========================================');
-  console.log('  QBTI 家长端已启动，端口: ' + PORT);
+  console.log('  QBTI 家长端独立服务器已启动');
+  console.log('  端口: ' + PORT);
+  console.log('  数据库: ' + (DATABASE_URL ? '✅ 已配置' : '❌ 未配置'));
+  console.log('  邮件: ' + (AGENTMAIL_API_KEY ? '✅ 已启用' : '⚠️ 未配置'));
+  console.log('  DeepSeek: ' + (DEEPSEEK_API_KEY ? '✅ 已启用' : '⚠️ 未配置'));
   console.log('===========================================');
 });

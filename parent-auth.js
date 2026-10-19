@@ -1,5 +1,5 @@
 /* ============================================================
-   QParent —— 独立家长端逻辑（包含忘记密码）
+   QParent —— 独立家长端逻辑（包含忘记密码 + 二次确认）
    ============================================================ */
 (function(){
   'use strict';
@@ -524,7 +524,13 @@
       </div>
     `;
     
-    $('btnLogout').addEventListener('click', () => { clearSession(); renderHome(); });
+    // 🚨 二次确认：退出登录
+    $('btnLogout').addEventListener('click', () => {
+      if(!confirm('确定要退出登录吗？')) return;
+      clearSession(); 
+      renderHome(); 
+    });
+    
     $('btnAddStudent').addEventListener('click', openBindDialog);
 
     loadBoundStudents();
@@ -578,7 +584,9 @@
   }
 
   async function handleUnbind(studentEmail){
+    // 🚨 二次确认：解绑孩子
     if(!confirm('确定要解除与该孩子的绑定吗？')) return;
+    
     try {
       await fetch(API_BASE + '/api/bind/remove', {
         method: 'POST',
