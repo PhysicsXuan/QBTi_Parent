@@ -1,5 +1,5 @@
 /* ============================================================
-   QParent —— 独立家长端逻辑（前端防重复提交安全版）
+   QParent —— 独立家长端逻辑（包含忘记密码）
    ============================================================ */
 (function(){
   'use strict';
@@ -10,7 +10,6 @@
   const CODE_COOLDOWN = 60 * 1000;
   const API_BASE = ''; 
 
-  // 🚨 前端全局锁，防止并发重复请求
   let isGenerating = false; 
 
   const $ = id => document.getElementById(id);
@@ -67,12 +66,14 @@
     mask.innerHTML = `
       <div class="auth-modal">
         <button class="auth-close" type="button" aria-label="关闭">×</button>
+
         <div class="auth-view" data-view="login" style="display:none;">
           <div class="auth-tabs">
             <button type="button" data-tab="login" class="active">登录</button>
             <button type="button" data-tab="register">注册</button>
           </div>
           <h2 class="auth-title">家长登录</h2>
+          <p class="auth-subtitle">用注册邮箱登录，查看孩子的量子态报告</p>
           <form data-form="login" autocomplete="on">
             <div class="auth-field" data-name="identifier">
               <label>邮箱</label>
@@ -86,14 +87,16 @@
             </div>
             <button type="submit" class="auth-submit">登录</button>
           </form>
-          <div class="auth-switch">还没有家长账户？<a data-switch="register">立即注册</a></div>
+          <div class="auth-switch"><a data-switch="forgot">忘记密码？</a> · 还没有家长账户？<a data-switch="register">立即注册</a></div>
         </div>
+
         <div class="auth-view" data-view="register" style="display:none;">
           <div class="auth-tabs">
             <button type="button" data-tab="login">登录</button>
             <button type="button" data-tab="register" class="active">注册</button>
           </div>
           <h2 class="auth-title">家长注册</h2>
+          <p class="auth-subtitle">填写信息完成验证，随后即可绑定孩子</p>
           <form data-form="register" autocomplete="on">
             <div class="auth-field" data-name="email">
               <label>邮箱</label>
@@ -132,6 +135,39 @@
           </form>
           <div class="auth-switch">已有账户？<a data-switch="login">去登录</a></div>
         </div>
+
+        <div class="auth-view" data-view="forgot" style="display:none;">
+          <h2 class="auth-title">重置密码</h2>
+          <p class="auth-subtitle">通过注册邮箱验证身份</p>
+          <form data-form="forgot" autocomplete="on">
+            <div class="auth-field" data-name="email">
+              <label>注册邮箱</label>
+              <input name="email" type="email" placeholder="your@email.com" />
+              <div class="auth-err"></div>
+            </div>
+            <div class="auth-field" data-name="code">
+              <label>验证码</label>
+              <div class="auth-code-row">
+                <input name="code" type="text" placeholder="6 位验证码" inputmode="numeric" maxlength="6" />
+                <button type="button" class="auth-send-code" data-action="send-forgot-code">发送验证码</button>
+              </div>
+              <div class="auth-err"></div>
+            </div>
+            <div class="auth-field" data-name="password">
+              <label>新密码</label>
+              <input name="password" type="password" placeholder="至少 6 位" />
+              <div class="auth-err"></div>
+            </div>
+            <div class="auth-field" data-name="confirm">
+              <label>确认新密码</label>
+              <input name="confirm" type="password" placeholder="再次输入新密码" />
+              <div class="auth-err"></div>
+            </div>
+            <button type="submit" class="auth-submit">重置密码</button>
+          </form>
+          <div class="auth-switch"><a data-switch="login">返回登录</a></div>
+        </div>
+
       </div>
     `;
     document.body.appendChild(mask);
@@ -142,11 +178,17 @@
     const mask = $('authMask');
     mask.querySelector('.auth-close').addEventListener('click', closeAuth);
     mask.addEventListener('click', e => { if(e.target === mask) closeAuth(); });
-    mask.querySelectorAll('[data-tab]').forEach(btn => btn.addEventListener('click', () => switchAuthView(btn.dataset.tab)));
-    mask.querySelectorAll('[data-switch]').forEach(a => a.addEventListener('click', () => switchAuthView(a.dataset.switch)));
+    mask.querySelectorAll('[data-tab]').forEach(btn => {
+      btn.addEventListener('click', () => switchAuthView(btn.dataset.tab));
+    });
+    mask.querySelectorAll('[data-switch]').forEach(a => {
+      a.addEventListener('click', () => switchAuthView(a.dataset.switch));
+    });
     mask.querySelector('[data-action="send-code"]').addEventListener('click', handleSendCode);
+    mask.querySelector('[data-action="send-forgot-code"]').addEventListener('click', handleSendForgotCode);
     mask.querySelector('[data-form="login"]').addEventListener('submit', handleLoginSubmit);
     mask.querySelector('[data-form="register"]').addEventListener('submit', handleRegisterSubmit);
+    mask.querySelector('[data-form="forgot"]').addEventListener('submit', handleForgotSubmit);
   }
 
   function openAuth(view){
@@ -160,6 +202,8 @@
     if(codeTimer){ clearInterval(codeTimer); codeTimer = null; }
     const btn = document.querySelector('[data-action="send-code"]');
     if(btn){ btn.disabled = false; btn.textContent = '发送验证码'; }
+    const btn2 = document.querySelector('[data-action="send-forgot-code"]');
+    if(btn2){ btn2.disabled = false; btn2.textContent = '发送验证码'; }
   }
   function switchAuthView(name){
     document.querySelectorAll('#authMask .auth-view').forEach(v => v.style.display = v.dataset.view === name ? '' : 'none');
@@ -197,6 +241,101 @@
 
   const RE_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
   const RE_PHONE = /^1[3-9]\d{9}$/;
+
+  async function handleSendForgotCode(){
+    const form = document.querySelector('#authMask [data-form="forgot"]');
+    const data = getFormData(form);
+    const btn = document.querySelector('#authMask [data-action="send-forgot-code"]');
+    clearFormErrors(form);
+
+    if(!RE_EMAIL.test(data.email)){ setFieldError(form, 'email', '请先填写正确的邮箱'); return; }
+
+    btn.disabled = true;
+    const oldText = btn.textContent;
+    btn.textContent = '发送中…';
+
+    try {
+      const res = await fetch(API_BASE + '/api/send-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: data.email })
+      });
+      const r = await res.json();
+      if(!res.ok || !r.success){
+        setFieldError(form, 'code', r.error || '发送失败');
+        toast(r.error || '发送失败', 'err');
+        btn.disabled = false;
+        btn.textContent = oldText;
+        return;
+      }
+      toast(r.message || '验证码已发送', 'ok');
+    } catch(err){
+      setFieldError(form, 'code', '无法连接服务器');
+      toast('无法连接服务器', 'err');
+      btn.disabled = false;
+      btn.textContent = oldText;
+      return;
+    }
+
+    let remaining = Math.floor(CODE_COOLDOWN / 1000);
+    btn.textContent = remaining + 's';
+    if(codeTimer) clearInterval(codeTimer);
+    codeTimer = setInterval(() => {
+      remaining--;
+      if(remaining <= 0){
+        clearInterval(codeTimer);
+        codeTimer = null;
+        btn.disabled = false;
+        btn.textContent = '发送验证码';
+      } else {
+        btn.textContent = remaining + 's';
+      }
+    }, 1000);
+  }
+
+  async function handleForgotSubmit(e){
+    e.preventDefault();
+    const form = e.target;
+    const data = getFormData(form);
+    const btn = form.querySelector('.auth-submit');
+    clearFormErrors(form);
+
+    const errs = {};
+    if(!RE_EMAIL.test(data.email)) errs.email = '邮箱格式不正确';
+    if(!data.code || data.code.length !== 6) errs.code = '请输入 6 位验证码';
+    if(!data.password || data.password.length < 6) errs.password = '密码至少 6 位';
+    if(data.password !== data.confirm) errs.confirm = '两次密码不一致';
+    
+    if(Object.keys(errs).length > 0){
+      Object.keys(errs).forEach(k => setFieldError(form, k, errs[k]));
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = '验证中…';
+
+    try {
+      const res = await fetch(API_BASE + '/api/parent/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: data.email, code: data.code, newPassword: data.password })
+      });
+      const r = await res.json();
+      if(!res.ok || !r.success){
+        setFieldError(form, 'code', r.error || '重置失败');
+        toast(r.error || '重置失败', 'err');
+        btn.disabled = false;
+        btn.textContent = '重置密码';
+        return;
+      }
+      toast('密码重置成功，请使用新密码登录', 'ok');
+      setTimeout(() => { switchAuthView('login'); }, 1000);
+    } catch(err){
+      toast('无法连接服务器', 'err');
+      btn.disabled = false;
+      btn.textContent = '重置密码';
+    }
+  }
 
   async function handleSendCode(){
     const form = document.querySelector('#authMask [data-form="register"]');
@@ -269,14 +408,14 @@
 
     const errs = {};
     if(!RE_EMAIL.test(data.email)) errs.email = '邮箱格式不正确';
-    if(!RE_PHONE.test(data.phone)) errs.phone = '请输入 11 位手机号';
+    if(!RE_PHONE.test(data.phone)) errs.phone = '请输入 11 位中国大陆手机号';
     if(!data.code || data.code.length !== 6) errs.code = '请输入 6 位验证码';
-    if(!data.username || data.username.length < 2) errs.username = '用户名 2-20 位';
+    if(!data.username || data.username.length < 2 || data.username.length > 20) errs.username = '用户名 2-20 位';
     if(!data.password || data.password.length < 6) errs.password = '密码至少 6 位';
     if(data.password !== data.confirm) errs.confirm = '两次密码不一致';
-    
     if(Object.keys(errs).length > 0){
       Object.keys(errs).forEach(k => setFieldError(form, k, errs[k]));
+      toast('请检查表单填写', 'err');
       return;
     }
 
@@ -287,7 +426,10 @@
       const res = await fetch(API_BASE + '/api/parent/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: data.email, phone: data.phone, code: data.code, username: data.username, password: data.password })
+        body: JSON.stringify({
+          email: data.email, phone: data.phone, code: data.code,
+          username: data.username, password: data.password
+        })
       });
       const r = await res.json();
       if(!res.ok || !r.success){
@@ -315,7 +457,8 @@
     const btn = form.querySelector('.auth-submit');
     clearFormErrors(form);
 
-    if(!data.identifier || !data.password){ return; }
+    if(!data.identifier){ setFieldError(form, 'identifier', '请输入邮箱'); return; }
+    if(!data.password){ setFieldError(form, 'password', '请输入密码'); return; }
 
     btn.disabled = true;
     btn.textContent = '登录中…';
@@ -608,15 +751,13 @@
 
     if(needGenerate && $('btnGenAI')){
       $('btnGenAI').addEventListener('click', async () => {
-        // 🚨 核心防御：前端全局锁
         if (isGenerating) return; 
-        
         isGenerating = true;
         const btn = $('btnGenAI');
         const studentEmail = btn.dataset.student;
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner"></span>生成中，请稍候…';
-        $('aiBody').innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);"><span class="spinner"></span>正在解析波函数（最长可能需要 30 秒）…</div>';
+        btn.innerHTML = '<span class="spinner"></span>生成中…';
+        $('aiBody').innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);"><span class="spinner"></span>正在解析波函数…</div>';
         
         try {
           const prompt = Q.buildPrompt(res, validity);
@@ -638,7 +779,7 @@
         } catch(err){
           $('aiBody').innerHTML = `<div style="color:#FFD98A;font-size:13px;padding:20px;text-align:center;">生成失败：${escapeHTML(err.message)}</div>`;
         } finally {
-          isGenerating = false; // 解锁
+          isGenerating = false; 
           if(btn) { btn.disabled = false; btn.textContent = '重新生成'; }
         }
       });
