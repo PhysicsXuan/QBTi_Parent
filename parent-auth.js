@@ -8,9 +8,241 @@
   const SESSION_KEY = 'qparent_session_v1';
   const SESSION_DURATION = 30 * 24 * 60 * 60 * 1000;
   const CODE_COOLDOWN = 60 * 1000;
-  const API_BASE = ''; 
+  const API_BASE = '';
 
-  let isGenerating = false; 
+  /* ============================================================
+     报告语言（家长端）
+     只影响报告页与 AI 分析；登录/绑定等操作界面保持中文
+     ============================================================ */
+  const LANG_KEY = 'qparent_report_lang_v1';
+  const LANGS = ['zh-CN', 'zh-TW', 'en', 'es', 'pt', 'ko', 'ja', 'fr'];
+  const LANG_NAMES = {
+    'zh-CN': '简体中文', 'zh-TW': '繁體中文', en: 'English', es: 'Español',
+    pt: 'Português', ko: '한국어', ja: '日本語', fr: 'Français'
+  };
+  const PT = {
+    'zh-CN': {
+      back: '← 返回', typeLabel: '量子学习类型', authenticity: '作答真实度', scoreLabel: '真实度评分',
+      notAssessed: '未评估', noIssues: '未发现明显疑点',
+      reasonsNote: '系统检测到一些作答特征，具体解读见下方 AI 分析。',
+      advice: '给家长的建议', dims: '四维倾向', ai: 'AI 引导报告',
+      generate: '✨ 直接生成 AI 报告', regen: '用当前语言重新生成', generating: '生成中…',
+      noAI: '孩子尚未生成 AI 报告，家长可在此直接生成',
+      localNote: '当前显示的是本地模板报告，点击下方按钮可由 AI 生成个性化分析。',
+      langNote: '当前报告为 %s；点击下方按钮可用当前语言重新生成。',
+      cached: '已读取已保存的报告', error: '生成失败，请稍后再试',
+      limit: '今日生成次数已达上限，请明天再试。', cooldown: '请等待 %s 秒后再生成。',
+      inFlight: '正在生成，请稍候。', notBound: '未绑定该学生。', noReport: '该学生尚未提交报告。',
+      levels: { high: '高可信', medium: '基本可信', low: '可信度偏低', very_low: '可信度存疑' },
+      adviceByLevel: {
+        high: '孩子的作答状态自然真实，可以放心参考。',
+        medium: '整体可信，建议以开放的心态和孩子交流。',
+        low: '可信度偏低，建议换一个孩子放松的时机重新测评。',
+        very_low: '存在明显疑点，建议先了解孩子最近的状态，不要直接使用这份报告。'
+      },
+      dims: { PO: '潜能开放度', II: '内在驱动力', LA: '学习自主性', UR: '未知应对方式' },
+      suffix: { E: '探索型', D: '深耕型', I: '融合型', A: '实践型' }
+    },
+    'zh-TW': {
+      back: '← 返回', typeLabel: '量子學習類型', authenticity: '作答真實度', scoreLabel: '真實度評分',
+      notAssessed: '未評估', noIssues: '未發現明顯疑點',
+      reasonsNote: '系統檢測到一些作答特徵，具體解讀見下方 AI 分析。',
+      advice: '給家長的建議', dims: '四維傾向', ai: 'AI 引導報告',
+      generate: '✨ 直接生成 AI 報告', regen: '用當前語言重新生成', generating: '生成中…',
+      noAI: '孩子尚未生成 AI 報告，家長可在此直接生成',
+      localNote: '目前顯示的是本地模板報告，點擊下方按鈕可由 AI 生成個人化分析。',
+      langNote: '目前報告為 %s；點擊下方按鈕可用當前語言重新生成。',
+      cached: '已讀取已保存的報告', error: '生成失敗，請稍後再試',
+      limit: '今日生成次數已達上限，請明天再試。', cooldown: '請等待 %s 秒後再生成。',
+      inFlight: '正在生成，請稍候。', notBound: '未綁定該學生。', noReport: '該學生尚未提交報告。',
+      levels: { high: '高可信', medium: '基本可信', low: '可信度偏低', very_low: '可信度存疑' },
+      adviceByLevel: {
+        high: '孩子的作答狀態自然真實，可以放心參考。',
+        medium: '整體可信，建議以開放的心態和孩子交流。',
+        low: '可信度偏低，建議換一個孩子放鬆的時機重新測評。',
+        very_low: '存在明顯疑點，建議先了解孩子最近的狀態，不要直接使用這份報告。'
+      },
+      dims: { PO: '潛能開放度', II: '內在驅動力', LA: '學習自主性', UR: '未知應對方式' },
+      suffix: { E: '探索型', D: '深耕型', I: '融合型', A: '實踐型' }
+    },
+    en: {
+      back: '← Back', typeLabel: 'Quantum learning type', authenticity: 'Response authenticity', scoreLabel: 'Authenticity score',
+      notAssessed: 'Not assessed', noIssues: 'No obvious issues detected',
+      reasonsNote: 'Some response patterns were detected. See the AI analysis below for details.',
+      advice: 'Advice for parents', dims: 'Four dimensions', ai: 'AI guidance report',
+      generate: '✨ Generate AI report', regen: 'Regenerate in current language', generating: 'Generating…',
+      noAI: 'The student has not generated an AI report yet. You can generate one here.',
+      localNote: 'This is a local template report. Use the button below to generate a personalized AI analysis.',
+      langNote: 'This report is in %s. Use the button below to regenerate it in the current language.',
+      cached: 'Loaded from the saved report', error: 'Generation failed. Please try again later.',
+      limit: 'Daily generation limit reached. Please try again tomorrow.', cooldown: 'Please wait %s seconds before generating again.',
+      inFlight: 'A report is already being generated. Please wait.', notBound: 'This student is not bound to your account.', noReport: 'The student has not submitted a report yet.',
+      levels: { high: 'High confidence', medium: 'Mostly reliable', low: 'Low confidence', very_low: 'Questionable' },
+      adviceByLevel: {
+        high: 'The responses look natural and authentic. You can rely on this report with confidence.',
+        medium: 'Overall reliable, with a few details worth discussing openly with your child.',
+        low: 'Confidence is low. Consider retaking the assessment when your child is relaxed.',
+        very_low: 'There are clear signs of careless or rushed answers. Talk with your child before using this report.'
+      },
+      dims: { PO: 'Potential openness', II: 'Intrinsic drive', LA: 'Learning agency', UR: 'Response to uncertainty' },
+      suffix: { E: 'Explorer', D: 'Deepener', I: 'Integrator', A: 'Practitioner' }
+    },
+    es: {
+      back: '← Volver', typeLabel: 'Tipo de aprendizaje cuántico', authenticity: 'Autenticidad de las respuestas', scoreLabel: 'Puntuación de autenticidad',
+      notAssessed: 'No evaluado', noIssues: 'No se detectaron problemas evidentes',
+      reasonsNote: 'Se detectaron algunos patrones de respuesta. Consulta el análisis de IA a continuación.',
+      advice: 'Consejos para las familias', dims: 'Cuatro dimensiones', ai: 'Informe de orientación con IA',
+      generate: '✨ Generar informe con IA', regen: 'Regenerar en el idioma actual', generating: 'Generando…',
+      noAI: 'El estudiante aún no ha generado un informe con IA. Puedes generarlo aquí.',
+      localNote: 'Este es un informe de plantilla local. Usa el botón de abajo para generar un análisis personalizado con IA.',
+      langNote: 'Este informe está en %s. Usa el botón de abajo para regenerarlo en el idioma actual.',
+      cached: 'Informe guardado cargado', error: 'No se pudo generar. Inténtalo más tarde.',
+      limit: 'Se alcanzó el límite diario. Inténtalo mañana.', cooldown: 'Espera %s segundos antes de volver a generar.',
+      inFlight: 'Ya se está generando un informe. Espera un momento.', notBound: 'Este estudiante no está vinculado a tu cuenta.', noReport: 'El estudiante aún no ha enviado un informe.',
+      levels: { high: 'Alta confianza', medium: 'Bastante fiable', low: 'Confianza baja', very_low: 'Cuestionable' },
+      adviceByLevel: {
+        high: 'Las respuestas parecen naturales y auténticas. Puedes confiar en este informe.',
+        medium: 'En general es fiable; conviene hablar con calma de algunos detalles.',
+        low: 'La confianza es baja. Considera repetir la evaluación cuando el niño esté relajado.',
+        very_low: 'Hay señales claras de respuestas apresuradas. Habla con el niño antes de usar el informe.'
+      },
+      dims: { PO: 'Apertura al potencial', II: 'Motivación intrínseca', LA: 'Autonomía de aprendizaje', UR: 'Respuesta a la incertidumbre' },
+      suffix: { E: 'Explorador', D: 'Profundizador', I: 'Integrador', A: 'Practicante' }
+    },
+    pt: {
+      back: '← Voltar', typeLabel: 'Tipo de aprendizagem quântica', authenticity: 'Autenticidade das respostas', scoreLabel: 'Pontuação de autenticidade',
+      notAssessed: 'Não avaliado', noIssues: 'Nenhum problema evidente detectado',
+      reasonsNote: 'Alguns padrões de resposta foram detectados. Veja a análise de IA abaixo.',
+      advice: 'Conselhos para as famílias', dims: 'Quatro dimensões', ai: 'Relatório de orientação com IA',
+      generate: '✨ Gerar relatório com IA', regen: 'Regerar no idioma atual', generating: 'Gerando…',
+      noAI: 'O estudante ainda não gerou um relatório com IA. Você pode gerar aqui.',
+      localNote: 'Este é um relatório modelo local. Use o botão abaixo para gerar uma análise personalizada com IA.',
+      langNote: 'Este relatório está em %s. Use o botão abaixo para regerá-lo no idioma atual.',
+      cached: 'Relatório salvo carregado', error: 'Falha ao gerar. Tente novamente mais tarde.',
+      limit: 'Limite diário atingido. Tente novamente amanhã.', cooldown: 'Aguarde %s segundos antes de gerar novamente.',
+      inFlight: 'Um relatório já está sendo gerado. Aguarde.', notBound: 'Este estudante não está vinculado à sua conta.', noReport: 'O estudante ainda não enviou um relatório.',
+      levels: { high: 'Alta confiança', medium: 'Bastante confiável', low: 'Baixa confiança', very_low: 'Questionável' },
+      adviceByLevel: {
+        high: 'As respostas parecem naturais e autênticas. Você pode confiar neste relatório.',
+        medium: 'No geral é confiável; vale conversar com calma sobre alguns detalhes.',
+        low: 'A confiança é baixa. Considere refazer a avaliação quando a criança estiver relaxada.',
+        very_low: 'Há sinais claros de respostas apressadas. Converse com a criança antes de usar o relatório.'
+      },
+      dims: { PO: 'Abertura ao potencial', II: 'Motivação intrínseca', LA: 'Autonomia de aprendizagem', UR: 'Resposta à incerteza' },
+      suffix: { E: 'Explorador', D: 'Aprofundador', I: 'Integrador', A: 'Praticante' }
+    },
+    ko: {
+      back: '← 뒤로', typeLabel: '양자 학습 유형', authenticity: '응답 진정성', scoreLabel: '진정성 점수',
+      notAssessed: '평가되지 않음', noIssues: '뚜렷한 문제가 발견되지 않았습니다',
+      reasonsNote: '일부 응답 패턴이 감지되었습니다. 아래 AI 분석을 참고하세요.',
+      advice: '부모님께 드리는 조언', dims: '네 가지 차원', ai: 'AI 안내 보고서',
+      generate: '✨ AI 보고서 생성', regen: '현재 언어로 다시 생성', generating: '생성 중…',
+      noAI: '학생이 아직 AI 보고서를 생성하지 않았습니다. 여기에서 생성할 수 있습니다.',
+      localNote: '현재 로컬 템플릿 보고서입니다. 아래 버튼으로 AI 맞춤 분석을 생성할 수 있습니다.',
+      langNote: '현재 보고서는 %s로 작성되었습니다. 아래 버튼으로 현재 언어로 다시 생성할 수 있습니다.',
+      cached: '저장된 보고서를 불러왔습니다', error: '생성에 실패했습니다. 잠시 후 다시 시도하세요.',
+      limit: '오늘의 생성 한도에 도달했습니다. 내일 다시 시도하세요.', cooldown: '%s초 후에 다시 생성하세요.',
+      inFlight: '이미 보고서를 생성 중입니다. 잠시 기다려 주세요.', notBound: '이 학생은 계정에 연결되어 있지 않습니다.', noReport: '학생이 아직 보고서를 제출하지 않았습니다.',
+      levels: { high: '높은 신뢰도', medium: '대체로 신뢰할 수 있음', low: '낮은 신뢰도', very_low: '의심스러움' },
+      adviceByLevel: {
+        high: '응답이 자연스럽고 진정성 있습니다. 이 보고서를 신뢰해도 좋습니다.',
+        medium: '전반적으로 신뢰할 수 있지만 몇 가지 세부 사항은 열린 마음으로 대화해 보세요.',
+        low: '신뢰도가 낮습니다. 아이가 편안할 때 다시 평가해 보세요.',
+        very_low: '성급하거나 대충한 응답의 흔적이 뚜렷합니다. 보고서를 사용하기 전에 아이와 대화해 보세요.'
+      },
+      dims: { PO: '잠재력 개방성', II: '내적 동기', LA: '학습 주도성', UR: '불확실성 대응' },
+      suffix: { E: '탐구자', D: '심화자', I: '통합자', A: '실행자' }
+    },
+    ja: {
+      back: '← 戻る', typeLabel: '量子学習タイプ', authenticity: '回答の信頼度', scoreLabel: '信頼度スコア',
+      notAssessed: '未評価', noIssues: '明らかな問題は見つかりませんでした',
+      reasonsNote: 'いくつかの回答パターンが検出されました。下のAI分析をご覧ください。',
+      advice: '保護者の方へ', dims: '4つの次元', ai: 'AIガイダンスレポート',
+      generate: '✨ AIレポートを生成', regen: '現在の言語で再生成', generating: '生成中…',
+      noAI: '生徒はまだAIレポートを生成していません。ここで生成できます。',
+      localNote: '現在表示されているのはローカルテンプレートです。下のボタンでAIによる個別分析を生成できます。',
+      langNote: 'このレポートは%sで作成されています。下のボタンで現在の言語に再生成できます。',
+      cached: '保存済みレポートを読み込みました', error: '生成に失敗しました。しばらくしてからお試しください。',
+      limit: '本日の生成上限に達しました。明日もう一度お試しください。', cooldown: '%s秒後に再度生成してください。',
+      inFlight: 'すでにレポートを生成中です。お待ちください。', notBound: 'この生徒はアカウントに紐付いていません。', noReport: '生徒はまだレポートを提出していません。',
+      levels: { high: '高い信頼度', medium: 'ほぼ信頼できる', low: '信頼度が低い', very_low: '疑わしい' },
+      adviceByLevel: {
+        high: '回答は自然で正直です。このレポートを安心して参考にできます。',
+        medium: '全体としては信頼できますが、いくつかの点はオープンな気持ちで話し合ってみてください。',
+        low: '信頼度が低めです。子どもがリラックスしている時に再評価することを検討してください。',
+        very_low: '雑な回答や早押しの痕跡が明らかです。レポートを使う前に子どもと話してみてください。'
+      },
+      dims: { PO: '可能性への開放性', II: '内発的動機', LA: '学習の主体性', UR: '不確実性への対応' },
+      suffix: { E: '探索者', D: '深耕者', I: '統合者', A: '実践者' }
+    },
+    fr: {
+      back: '← Retour', typeLabel: 'Type d’apprentissage quantique', authenticity: 'Authenticité des réponses', scoreLabel: 'Score d’authenticité',
+      notAssessed: 'Non évalué', noIssues: 'Aucun problème évident détecté',
+      reasonsNote: 'Certains schémas de réponse ont été détectés. Voir l’analyse IA ci-dessous.',
+      advice: 'Conseils aux parents', dims: 'Quatre dimensions', ai: 'Rapport d’orientation IA',
+      generate: '✨ Générer le rapport IA', regen: 'Régénérer dans la langue actuelle', generating: 'Génération…',
+      noAI: 'L’élève n’a pas encore généré de rapport IA. Vous pouvez le faire ici.',
+      localNote: 'Il s’agit d’un modèle local. Utilisez le bouton ci-dessous pour générer une analyse personnalisée par IA.',
+      langNote: 'Ce rapport est en %s. Utilisez le bouton ci-dessous pour le régénérer dans la langue actuelle.',
+      cached: 'Rapport enregistré chargé', error: 'Échec de la génération. Réessayez plus tard.',
+      limit: 'Limite quotidienne atteinte. Réessayez demain.', cooldown: 'Veuillez attendre %s secondes avant de régénérer.',
+      inFlight: 'Un rapport est déjà en cours de génération. Veuillez patienter.', notBound: 'Cet élève n’est pas lié à votre compte.', noReport: 'L’élève n’a pas encore soumis de rapport.',
+      levels: { high: 'Confiance élevée', medium: 'Plutôt fiable', low: 'Faible confiance', very_low: 'Douteux' },
+      adviceByLevel: {
+        high: 'Les réponses semblent naturelles et authentiques. Vous pouvez vous fier à ce rapport.',
+        medium: 'Globalement fiable, mais quelques points méritent une discussion ouverte avec votre enfant.',
+        low: 'La confiance est faible. Envisagez de refaire l’évaluation lorsque votre enfant est détendu.',
+        very_low: 'Des signes de réponses précipitées sont évidents. Parlez avec votre enfant avant d’utiliser ce rapport.'
+      },
+      dims: { PO: 'Ouverture au potentiel', II: 'Motivation intrinsèque', LA: 'Autonomie d’apprentissage', UR: 'Réaction à l’incertitude' },
+      suffix: { E: 'Explorateur', D: 'Approfondisseur', I: 'Intégrateur', A: 'Praticien' }
+    }
+  };
+
+  function currentLangName(){ return LANG_NAMES[currentLang] || currentLang; }
+  function T(key){
+    const d = PT[currentLang] || PT['zh-CN'];
+    return d[key] != null ? d[key] : (PT['zh-CN'][key] != null ? PT['zh-CN'][key] : key);
+  }
+  function loadLang(){
+    try {
+      const v = localStorage.getItem(LANG_KEY);
+      if(LANGS.includes(v)) return v;
+    } catch(e){}
+    return 'zh-CN';
+  }
+  let currentLang = loadLang();
+  let currentView = 'gate';
+  let lastReport = null;
+
+  function initLangSelect(){
+    const sel = $('reportLang');
+    if(!sel) return;
+    sel.innerHTML = LANGS.map(l => '<option value="' + l + '">' + LANG_NAMES[l] + '</option>').join('');
+    sel.value = currentLang;
+    if(!sel._langBound){
+      sel._langBound = true;
+      sel.addEventListener('change', () => setLang(sel.value));
+    }
+  }
+
+  function setLang(l){
+    if(!LANGS.includes(l)) l = 'zh-CN';
+    currentLang = l;
+    try { localStorage.setItem(LANG_KEY, l); } catch(e){}
+    const sel = $('reportLang');
+    if(sel) sel.value = l;
+    /* 只重绘，不触发生成；已有报告保留，用户可显式选择“用当前语言重新生成” */
+    if(currentView === 'report' && lastReport){
+      renderReportView(lastReport.res, lastReport.validity, lastReport.aiReport, lastReport.updatedAt, lastReport.extra);
+    } else if(currentView === 'dashboard' && currentParent){
+      renderDashboard();
+    } else {
+      renderGate();
+    }
+  }
+
+  let isGenerating = false;
 
   const $ = id => document.getElementById(id);
   const app = $('app');
@@ -494,6 +726,8 @@
   }
 
   function renderGate(){
+    currentView = 'gate';
+    lastReport = null;
     app.innerHTML = `
       <div class="card gate">
         <h1>QBTI 家长端</h1>
@@ -507,6 +741,8 @@
   }
 
   async function renderDashboard(){
+    currentView = 'dashboard';
+    lastReport = null;
     app.innerHTML = `
       <div class="topbar">
         <div class="user-chip">
@@ -687,18 +923,22 @@
       const res = await fetch(API_BASE + '/api/parent/report/' + encodeURIComponent(studentEmail) + '?parentEmail=' + encodeURIComponent(currentParent.email));
       if(!res.ok) { const d = await res.json(); throw new Error(d.error || '加载失败'); }
       const data = await res.json();
-      
-      const p = data.report.payload;
-      let fullResult = p.fullResult || {
+
+      const p = data.report.payload || {};
+      const fullResult = p.fullResult || {
         letters: p.baseCode ? p.baseCode.split('') : [],
-        suffix: { letter: p.suffixLetter || 'E', name: p.suffixName || '探索型' },
+        suffix: { letter: p.suffixLetter || 'E', name: p.suffixName || '' },
         dimGroupRatio: p.dimGroupRatio || {}, dimLeadInfo: p.dimLeadInfo || {},
         suffixRatio: p.suffixRatio || {}, suffixGap: p.suffixGap || 0, dominanceScore: {}
       };
-      
-      renderReportView(fullResult, p.validity, p.aiReport, data.report.updatedAt, p);
+      const extra = Object.assign({}, p, {
+        studentEmail: data.report.studentEmail || studentEmail,
+        aiReportLang: p.aiReportLang || null
+      });
+      renderReportView(fullResult, p.validity, p.aiReport, data.report.updatedAt, extra);
     } catch(err){
-      app.innerHTML = `<button class="back-btn" id="btnBack">← 返回</button><div class="card" style="text-align:center;color:#FF8FA0;">加载失败：${escapeHTML(err.message)}</div>`;
+      currentView = 'dashboard';
+      app.innerHTML = `<button class="back-btn" id="btnBack">${escapeHTML(T('back'))}</button><div class="card" style="text-align:center;color:#FF8FA0;">${escapeHTML(T('error'))}: ${escapeHTML(err.message)}</div>`;
       $('btnBack').addEventListener('click', renderDashboard);
     }
   }
@@ -708,91 +948,146 @@
     return h.split(/\n{2,}/).map(p => { const t = p.trim(); if(!t) return ''; if(/^<(h4|ul|li)/.test(t)) return t; return '<p>' + t.replace(/\n/g,'<br>') + '</p>'; }).join('');
   }
 
-  function renderReportView(res, validity, aiReportText, updatedAt, extraData){
-    const baseCode = res.letters.join('');
-    const typeName = Q.TYPE_NAMES[baseCode] || '未知类型';
-    setAccent(res.dominanceScore && Object.keys(res.dominanceScore).length > 0 ? Q.analyzeQuantumState(res).type : (extraData.quantumState || 'superposition'));
+  function localizedReasons(validity){
+    if(!validity) return '▸ ' + escapeHTML(T('noIssues'));
+    if(currentLang === 'zh-CN' || currentLang === 'zh-TW'){
+      const arr = (validity.parentReasons && validity.parentReasons.length) ? validity.parentReasons : [T('noIssues')];
+      return arr.map(r => '▸ ' + escapeHTML(r)).join('<br>');
+    }
+    return '▸ ' + escapeHTML(T('reasonsNote'));
+  }
 
-    const vColorMap = { high:'#50DC8C', medium:'#FFD98A', low:'#FF8A48', very_low:'#EB414B' };
-    const vColor = validity ? (vColorMap[validity.level] || '#8B90B8') : '#8B90B8';
-    const reasons = (validity && validity.parentReasons) ? validity.parentReasons.map(r => '▸ ' + escapeHTML(r)).join('<br>') : '▸ 未发现明显疑点';
-    const dimsHTML = Q.DIMS.map(d => {
-      const ratio = res.dimGroupRatio[d.id] || {}; const info = res.dimLeadInfo[d.id] || { lead: '-' };
-      return `<div class="dim-row"><div class="dim-name">${d.name}</div><div class="dim-bar">${d.letters.map(l => `<div class="seg" style="width:${ratio[l]||0}%;background:${DIM_COLORS[d.id][l]};">${ratio[l]>=10?l:''}</div>`).join('')}</div><div class="dim-lead">${info.lead}</div></div>`;
-    }).join('');
+  function aiErrorText(data){
+    const code = data && data.code;
+    if(code === 'COOLDOWN') return T('cooldown').replace('%s', data.wait || 60);
+    if(code === 'DAILY_LIMIT') return T('limit');
+    if(code === 'IN_FLIGHT') return T('inFlight');
+    if(code === 'NOT_BOUND') return T('notBound');
+    if(code === 'NO_REPORT') return T('noReport');
+    return (data && data.error) || T('error');
+  }
 
-    const needGenerate = !aiReportText;
-    const aiActionHTML = needGenerate ? `
-      <div style="text-align:center;padding:20px 0;">
-        <div style="color:var(--muted);font-size:13px;margin-bottom:14px;">孩子尚未生成 AI 报告，家长可在此直接生成</div>
-        <button class="btn primary sm" id="btnGenAI" data-student="${escapeHTML(extraData.studentEmail)}">✨ 直接生成 AI 报告</button>
-      </div>
-    ` : renderMD(aiReportText);
+  async function generateAIReport(studentEmail, btn){
+    if(isGenerating) return;
+    if(!studentEmail){ toast(T('noReport'), 'err'); return; }
+    const wasRegen = !!(lastReport && lastReport.aiReport && (lastReport.extra.aiReportSource || 'ai') === 'ai');
+    isGenerating = true;
+    if(btn){
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>' + escapeHTML(T('generating'));
+    }
 
-    app.innerHTML = `
-      <button class="back-btn" id="btnBack">← 返回</button>
-      <div class="hero">
-        <div class="code">${baseCode}<span style="font-size:0.7em;color:var(--q-color)">-${res.suffix?.letter||''}</span></div>
-        <div class="name">${escapeHTML(typeName)} · ${res.suffix?.name||''}</div>
-        <div class="sub">量子学习类型</div>
-      </div>
-      <div class="title">作答真实度</div>
-      <div class="card" style="border-color:${vColor}55;background:${vColor}0F;">
-        <div class="authenticity">
-          <div><div class="label">Authenticity Score</div><div class="level" style="color:${vColor};">● ${validity?escapeHTML(validity.levelText):'未评估'}</div></div>
-          <div class="score" style="color:${vColor};">${validity?validity.authenticity:'--'}<small> / 100</small></div>
-        </div>
-        <div class="reason">${reasons}</div>
-        ${validity?`<div class="advice">给家长的建议：${escapeHTML(validity.advice)}</div>`:''}
-      </div>
-      <div class="title">四维倾向</div>
-      <div class="card">${dimsHTML}</div>
-      <div class="title">AI 引导报告</div>
-      <div class="card ai-body" id="aiBody">${aiActionHTML}</div>
-      <div class="result-actions"><button class="btn" id="btnBackBottom">返回</button></div>
-    `;
-    
-    $('btnBack').addEventListener('click', renderDashboard);
-    $('btnBackBottom').addEventListener('click', renderDashboard);
-
-    if(needGenerate && $('btnGenAI')){
-      $('btnGenAI').addEventListener('click', async () => {
-        if (isGenerating) return; 
-        isGenerating = true;
-        const btn = $('btnGenAI');
-        const studentEmail = btn.dataset.student;
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner"></span>生成中…';
-        $('aiBody').innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);"><span class="spinner"></span>正在解析波函数…</div>';
-        
-        try {
-          const prompt = Q.buildPrompt(res, validity);
-          const apiRes = await fetch(API_BASE + '/api/generate-ai-report', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt, studentEmail })
-          });
-          const apiData = await apiRes.json();
-          if(!apiRes.ok || !apiData.success) throw new Error(apiData.error || '生成失败');
-
-          await fetch(API_BASE + '/api/parent/report/update-ai', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ studentEmail, aiReport: apiData.text })
-          });
-          
-          $('aiBody').innerHTML = renderMD(apiData.text);
-        } catch(err){
-          $('aiBody').innerHTML = `<div style="color:#FFD98A;font-size:13px;padding:20px;text-align:center;">生成失败：${escapeHTML(err.message)}</div>`;
-        } finally {
-          isGenerating = false; 
-          if(btn) { btn.disabled = false; btn.textContent = '重新生成'; }
-        }
+    try {
+      const apiRes = await fetch(API_BASE + '/api/generate-ai-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentEmail: currentParent.email, studentEmail, lang: currentLang })
       });
+      const apiData = await apiRes.json().catch(() => ({}));
+      if(!apiRes.ok || !apiData.success) throw new Error(aiErrorText(apiData));
+      if(apiData.cached) toast(T('cached'), 'info');
+
+      if(lastReport){
+        lastReport.aiReport = apiData.text;
+        lastReport.aiReportLang = apiData.lang || currentLang;
+        lastReport.aiReportSource = 'ai';
+        lastReport.extra.aiReportLang = lastReport.aiReportLang;
+        lastReport.extra.aiReportSource = 'ai';
+        lastReport.extra.studentEmail = studentEmail;
+        lastReport.updatedAt = Date.now();
+        renderReportView(lastReport.res, lastReport.validity, apiData.text, lastReport.updatedAt, lastReport.extra);
+      } else {
+        await showSyncedReport(studentEmail);
+      }
+    } catch(err){
+      toast(err.message || T('error'), 'err');
+      if(btn){
+        btn.disabled = false;
+        btn.textContent = wasRegen ? T('regen') : T('generate');
+      }
+    } finally {
+      isGenerating = false;
     }
   }
 
+  function renderReportView(res, validity, aiReportText, updatedAt, extraData){
+    const lang = currentLang;
+    const pack = PT[lang] || PT['zh-CN'];
+    const baseCode = res.letters.join('');
+    const typeName = (lang === 'zh-CN' || lang === 'zh-TW') ? (Q.TYPE_NAMES[baseCode] || '') : '';
+    const suffixLetter = (res.suffix && res.suffix.letter) || '';
+    const suffixName = (pack.suffix && pack.suffix[suffixLetter]) || (res.suffix && res.suffix.name) || '';
+    const safeStudentEmail = (extraData && extraData.studentEmail) || '';
+    /* 旧报告没有 aiReportLang 时按中文处理，避免英文界面误以为语言已一致 */
+    const reportLang = (extraData && extraData.aiReportLang) || (aiReportText ? 'zh-CN' : null);
+    const reportSource = (extraData && extraData.aiReportSource) || 'ai';
+
+    currentView = 'report';
+    lastReport = {
+      res: res, validity: validity, aiReport: aiReportText || null,
+      updatedAt: updatedAt,
+      extra: Object.assign({}, extraData || {}, { studentEmail: safeStudentEmail, aiReportLang: reportLang, aiReportSource: reportSource })
+    };
+
+    setAccent(res.dominanceScore && Object.keys(res.dominanceScore).length > 0 ? Q.analyzeQuantumState(res).type : ((extraData && extraData.quantumState) || 'superposition'));
+
+    const vColorMap = { high:'#50DC8C', medium:'#FFD98A', low:'#FF8A48', very_low:'#EB414B' };
+    const vColor = validity ? (vColorMap[validity.level] || '#8B90B8') : '#8B90B8';
+    const levelText = validity ? (pack.levels[validity.level] || validity.levelText || pack.notAssessed) : pack.notAssessed;
+    const reasons = localizedReasons(validity);
+    const advice = validity ? (pack.adviceByLevel[validity.level] || '') : '';
+    const dimsHTML = Q.DIMS.map(d => {
+      const ratio = res.dimGroupRatio[d.id] || {}; const info = res.dimLeadInfo[d.id] || { lead: '-' };
+      const dimName = (pack.dims && pack.dims[d.id]) || d.name;
+      return `<div class="dim-row"><div class="dim-name">${escapeHTML(dimName)}</div><div class="dim-bar">${d.letters.map(l => `<div class="seg" style="width:${ratio[l]||0}%;background:${DIM_COLORS[d.id][l]};">${ratio[l]>=10?l:''}</div>`).join('')}</div><div class="dim-lead">${info.lead}</div></div>`;
+    }).join('');
+
+    const hasText = !!aiReportText;
+    const isRealAI = hasText && reportSource === 'ai';
+    const langMismatch = isRealAI && reportLang && reportLang !== lang;
+    let aiHTML = '';
+    if(hasText) aiHTML += renderMD(aiReportText);
+    if(!isRealAI){
+      aiHTML += `<div style="text-align:center;padding:20px 0;">
+        <div style="color:var(--muted);font-size:13px;margin-bottom:14px;">${escapeHTML(hasText ? pack.localNote : pack.noAI)}</div>
+        <button class="ai-gen-btn" id="btnGenAI" data-student="${escapeHTML(safeStudentEmail)}">${escapeHTML(pack.generate)}</button>
+      </div>`;
+    } else if(langMismatch){
+      aiHTML += `<div class="ai-lang-note">${escapeHTML(pack.langNote.replace('%s', LANG_NAMES[reportLang] || reportLang))}</div>
+        <div style="text-align:center;padding:8px 0 0;"><button class="ai-gen-btn" id="btnGenAI" data-student="${escapeHTML(safeStudentEmail)}">${escapeHTML(pack.regen)}</button></div>`;
+    }
+
+    app.innerHTML = `
+      <button class="back-btn" id="btnBack">${escapeHTML(pack.back)}</button>
+      <div class="hero">
+        <div class="code">${baseCode}<span style="font-size:0.7em;color:var(--q-color)">-${suffixLetter}</span></div>
+        <div class="name">${typeName ? escapeHTML(typeName) + ' · ' : ''}${escapeHTML(suffixName)}</div>
+        <div class="sub">${escapeHTML(pack.typeLabel)}</div>
+      </div>
+      <div class="title">${escapeHTML(pack.authenticity)}</div>
+      <div class="card" style="border-color:${vColor}55;background:${vColor}0F;">
+        <div class="authenticity">
+          <div><div class="label">${escapeHTML(pack.scoreLabel)}</div><div class="level" style="color:${vColor};">● ${escapeHTML(levelText)}</div></div>
+          <div class="score" style="color:${vColor};">${validity?validity.authenticity:'--'}<small> / 100</small></div>
+        </div>
+        <div class="reason">${reasons}</div>
+        ${validity?`<div class="advice">${escapeHTML(pack.advice)} — ${escapeHTML(advice)}</div>`:''}
+      </div>
+      <div class="title">${escapeHTML(pack.dims)}</div>
+      <div class="card">${dimsHTML}</div>
+      <div class="title">${escapeHTML(pack.ai)}</div>
+      <div class="card ai-body" id="aiBody">${aiHTML}</div>
+      <div style="text-align:center;margin-top:24px;"><button class="btn" id="btnBackBottom">${escapeHTML(pack.back)}</button></div>
+    `;
+
+    $('btnBack').addEventListener('click', renderDashboard);
+    $('btnBackBottom').addEventListener('click', renderDashboard);
+    const genBtn = $('btnGenAI');
+    if(genBtn) genBtn.addEventListener('click', () => generateAIReport(genBtn.dataset.student, genBtn));
+  }
+
   function init(){
+    initLangSelect();
     const session = loadSession();
     if(session) currentParent = { email: session.email, phone: session.phone, username: session.username };
     renderHome();

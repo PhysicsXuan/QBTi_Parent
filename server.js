@@ -5,6 +5,8 @@
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
+const fs = require('fs');
+const vm = require('vm');
 const { Pool } = require('pg');
 
 const app = express();
@@ -43,6 +45,105 @@ const pool = new Pool({
 pool.on('error', (err) => {
   console.error('PostgreSQL 连接池异常:', err.message);
 });
+
+/* ---------- 加载 QBTI 纯逻辑（服务端构建提示词，客户端不能自定义 prompt） ---------- */
+let QBTI = null;
+try {
+  const sandbox = { window: {} };
+  vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, 'qbti-core.js'), 'utf8'), sandbox);
+  QBTI = sandbox.window.QBTI;
+  console.log('✅ qbti-core 已加载（服务端提示词）');
+} catch (err) {
+  console.error('❌ qbti-core 加载失败:', err.message);
+}
+
+/* ---------- AI 防刷参数 ---------- */
+const AI_COOLDOWN_MS = 60 * 1000;
+const AI_DAILY_LIMIT = 10;
+const AI_LANGS = ['zh-CN', 'zh-TW', 'en', 'es', 'pt', 'ko', 'ja', 'fr'];
+const aiInFlight = new Set();
+const aiCooldown = new Map();
+
+/* 报告输出语言：由服务端强制覆盖，客户端只传语言代码 */
+const AI_LANG_META = {
+  'zh-TW': { name: '繁體中文', instr: '請使用繁體中文撰寫整份報告，不要使用簡體中文。' },
+  en: { name: 'English', instr: 'Write the entire report in English, about 800-1000 words. Do not write in Chinese.', headings: ['1. Authenticity Score', '2. Your Child’s Quantum Portrait', '3. Your Child’s Energy Barriers', '4. Quantum Tunneling Paths', '5. A Note to Parents'] },
+  es: { name: 'Español', instr: 'Escribe todo el informe en español, unas 800-1000 palabras. No escribas en chino.', headings: ['1. Puntuación de autenticidad', '2. Retrato cuántico de tu hijo/a', '3. Barreras de energía', '4. Rutas de efecto túnel cuántico', '5. Una nota para las familias'] },
+  pt: { name: 'Português', instr: 'Escreva todo o relatório em português, com cerca de 800-1000 palavras. Não escreva em chinês.', headings: ['1. Pontuação de autenticidade', '2. Retrato quântico do seu filho', '3. Barreiras de energia', '4. Caminhos de tunelamento quântico', '5. Uma nota aos pais'] },
+  ko: { name: '한국어', instr: '전체 보고서를 한국어로 800-1000자 정도로 작성하세요. 중국어로 쓰지 마세요.', headings: ['1. 진정성 점수', '2. 자녀의 양자 초상', '3. 자녀의 에너지 장벽', '4. 양자 터널링 경로', '5. 부모에게 드리는 말'] },
+  ja: { name: '日本語', instr: 'レポート全体を日本語で800〜1000字程度に書いてください。中国語では書かないでください。', headings: ['1. 回答の信頼度', '2. 子どもの量子ポートレート', '3. 子どものエネルギーバリア', '4. 量子トンネル経路', '5. 保護者の方へ'] },
+  fr: { name: 'Français', instr: 'Rédigez tout le rapport en français, environ 800 à 1000 mots. N’écrivez pas en chinois.', headings: ['1. Score d’authenticité', '2. Portrait quantique de votre enfant', '3. Barrières d’énergie', '4. Chemins d’effet tunnel quantique', '5. Un mot aux parents'] }
+};
+
+function addLanguageInstruction(prompt, lang) {
+  if (!AI_LANGS.includes(lang) || lang === 'zh-CN') return prompt;
+  if (lang === 'zh-TW') return prompt + '\n\n【輸出語言】\n' + AI_LANG_META['zh-TW'].instr;
+  const m = AI_LANG_META[lang];
+  if (!m) return prompt;
+  return prompt
+    + '\n\n【OUTPUT LANGUAGE — THIS OVERRIDES THE CHINESE INSTRUCTIONS ABOVE】\n'
+    + m.instr + '\n'
+    + 'Use exactly these five section headings:\n'
+    + m.headings.join('\n') + '\n'
+    + 'Translate every part of the report, including headings, advice, and the closing note, into ' + m.name + '. Do not output Chinese.';
+}
+
+function localDay() {
+  const d = new Date();
+  const p = n => (n < 10 ? '0' + n : '' + n);
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+
+async function getAIUsage(parentEmail, day) {
+  const r = await pool.query('SELECT count FROM ai_usage WHERE "parentEmail" = $1 AND day = $2', [parentEmail, day]);
+  return r.rows[0] ? Number(r.rows[0].count) : 0;
+}
+
+async function incAIUsage(parentEmail, day) {
+  await pool.query(
+    `INSERT INTO ai_usage ("parentEmail", day, count) VALUES ($1, $2, 1)
+     ON CONFLICT ("parentEmail", day) DO UPDATE SET count = ai_usage.count + 1`,
+    [parentEmail, day]
+  );
+}
+
+/* 用数据库里的报告数据在服务端构建提示词；客户端不再传 prompt */
+function buildServerPrompt(payload, lang) {
+  if (!QBTI || !payload) return null;
+  const p = payload;
+  const res = p.fullResult || {
+    letters: p.baseCode ? String(p.baseCode).split('') : [],
+    suffix: { letter: p.suffixLetter || 'E', name: p.suffixName || '' },
+    dimGroupRatio: p.dimGroupRatio || {},
+    dimLeadInfo: p.dimLeadInfo || {},
+    suffixRatio: p.suffixRatio || {},
+    suffixGap: p.suffixGap || 0,
+    dominanceScore: {}
+  };
+  try {
+    return addLanguageInstruction(QBTI.buildPrompt(res, p.validity || null), lang);
+  } catch (err) {
+    console.error('[AI] 构建提示词失败:', err.message);
+    return null;
+  }
+}
+
+/* ---------- ai_usage 表（每次生成计数，重启不丢） ---------- */
+async function initDB() {
+  if (!DATABASE_URL) return;
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS ai_usage (
+      "parentEmail" VARCHAR(255) NOT NULL,
+      day VARCHAR(10) NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY ("parentEmail", day)
+    );`);
+    console.log('✅ ai_usage 表检查完成');
+  } catch (err) {
+    console.error('❌ ai_usage 表初始化失败:', err.message);
+  }
+}
 
 /* ---------- 工具函数 ---------- */
 function hashPassword(pw, salt) {
@@ -131,11 +232,6 @@ setInterval(() => {
     if (val.expiresAt < now && (now - val.lastSentAt) > 10 * 60 * 1000) codeStore.delete(key);
   }
 }, 60 * 1000);
-
-/* ============================================================
-   AI 接口防刷限流
-   ============================================================ */
-const aiCooldown = new Map(); 
 
 /* ============================================================
    API: 发送验证码（注册 / 重置密码共用）
@@ -370,25 +466,72 @@ app.get('/api/parent/report/:studentEmail', async (req, res) => {
 });
 
 /* ============================================================
-   API: AI 代理生成（严格 60 秒冷却限制）
+   API: AI 代理生成
+   屏障：绑定校验 + 同语言缓存 + 并发锁 + 60 秒冷却 + 每日上限
+   客户端只传 parentEmail / studentEmail / lang，不能传 prompt
    ============================================================ */
 app.post('/api/generate-ai-report', async (req, res) => {
-  const { prompt, studentEmail } = req.body || {};
-  if (!prompt || !studentEmail) return res.status(400).json({ error: '参数不完整' });
-  if (!DEEPSEEK_API_KEY) return res.status(500).json({ error: '未配置 DEEPSEEK_API_KEY 环境变量' });
+  const { parentEmail, studentEmail, lang } = req.body || {};
+  const pe = String(parentEmail || '').trim().toLowerCase();
+  const se = String(studentEmail || '').trim().toLowerCase();
+  const lg = AI_LANGS.includes(lang) ? lang : 'zh-CN';
 
-  const se = String(studentEmail).toLowerCase().trim();
-  const lastTime = aiCooldown.get(se) || 0;
-  const now = Date.now();
-  
-  // 60秒防刷限制
-  if (now - lastTime < 60 * 1000) {
-    const wait = Math.ceil((60 * 1000 - (now - lastTime)) / 1000);
-    return res.status(429).json({ error: `请求过于频繁，请 ${wait} 秒后再试（防止重复扣费）` });
-  }
-  aiCooldown.set(se, now);
+  if (!pe || !se) return res.status(400).json({ error: '参数不完整', code: 'BAD_REQUEST' });
+  if (!DEEPSEEK_API_KEY) return res.status(500).json({ error: '未配置 DEEPSEEK_API_KEY', code: 'NO_KEY' });
+  if (!QBTI) return res.status(500).json({ error: '服务端提示词模块未加载', code: 'NO_CORE' });
 
   try {
+    /* 1) 必须是真实绑定关系，阻止任意邮箱刷接口 */
+    const bind = await pool.query(
+      'SELECT id FROM bindings WHERE "studentEmail" = $1 AND "parentEmail" = $2',
+      [se, pe]
+    );
+    if (bind.rows.length === 0) {
+      return res.status(403).json({ error: '未绑定该学生', code: 'NOT_BOUND' });
+    }
+
+    /* 2) 同语言已有 AI 报告：直接返回缓存，零 token */
+    const repRes = await pool.query('SELECT payload FROM reports WHERE "studentEmail" = $1', [se]);
+    const report = repRes.rows[0];
+    if (!report || !report.payload) {
+      return res.status(404).json({ error: '该学生尚未提交报告', code: 'NO_REPORT' });
+    }
+    const payload = report.payload;
+    const cachedLang = payload.aiReportLang || 'zh-CN';
+    const cachedSource = payload.aiReportSource || 'ai';
+    /* 只把真正的 AI 报告当缓存；学生端的本地兜底报告（local）允许家长重新生成 */
+    if (payload.aiReport && cachedSource === 'ai' && cachedLang === lg) {
+      return res.json({ success: true, text: payload.aiReport, lang: lg, cached: true });
+    }
+
+    /* 3) 同一家长同时只允许一个生成请求，防止连点并发 */
+    if (aiInFlight.has(pe)) {
+      return res.status(429).json({ error: '正在生成，请稍候', code: 'IN_FLIGHT' });
+    }
+
+    /* 4) 同一家长 + 学生 60 秒冷却 */
+    const cooldownKey = pe + '|' + se;
+    const last = aiCooldown.get(cooldownKey) || 0;
+    const now = Date.now();
+    if (now - last < AI_COOLDOWN_MS) {
+      const wait = Math.ceil((AI_COOLDOWN_MS - (now - last)) / 1000);
+      return res.status(429).json({ error: '请求过于频繁，请稍后再试', code: 'COOLDOWN', wait });
+    }
+
+    /* 5) 每日上限（数据库持久化，重启不重置） */
+    const day = localDay();
+    const used = await getAIUsage(pe, day);
+    if (used >= AI_DAILY_LIMIT) {
+      return res.status(429).json({ error: '今日生成次数已达上限', code: 'DAILY_LIMIT', limit: AI_DAILY_LIMIT });
+    }
+
+    /* 6) 服务端构建提示词，客户端不能传任意 prompt */
+    const prompt = buildServerPrompt(payload, lg);
+    if (!prompt) return res.status(500).json({ error: '构建提示词失败', code: 'PROMPT_FAILED' });
+
+    aiInFlight.add(pe);
+    aiCooldown.set(cooldownKey, now);
+
     const response = await fetch('https://api.deepseek.com/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DEEPSEEK_API_KEY },
@@ -404,37 +547,43 @@ app.post('/api/generate-ai-report', async (req, res) => {
       })
     });
 
-    if (!response.ok) throw new Error(`DeepSeek API 返回错误`);
+    if (!response.ok) throw new Error('DeepSeek API 返回错误');
     const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
+    const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
     if (!content) throw new Error('API 返回内容为空');
-    
-    res.json({ success: true, text: content });
+
+    /* 7) 服务端直接落库，客户端不再调 update-ai */
+    payload.aiReport = content;
+    payload.aiReportLang = lg;
+    payload.aiReportSource = 'ai';
+    payload.aiReportAt = Date.now();
+    let saved = true;
+    try {
+      await pool.query(
+        `UPDATE reports SET payload = $1, "updatedAt" = $2 WHERE "studentEmail" = $3`,
+        [JSON.stringify(payload), Date.now(), se]
+      );
+    } catch (dbErr) {
+      saved = false;
+      console.error('[AI] 报告落库失败:', dbErr.message);
+    }
+    try {
+      await incAIUsage(pe, day);
+    } catch (usageErr) {
+      console.error('[AI] 用量计数失败:', usageErr.message);
+    }
+
+    res.json({ success: true, text: content, lang: lg, cached: false, saved });
   } catch (err) {
     console.error('[DeepSeek] 代理请求失败:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/parent/report/update-ai', async (req, res) => {
-  const { studentEmail, aiReport } = req.body || {};
-  if (!studentEmail || !aiReport) return res.status(400).json({ error: '参数不完整' });
-  const se = String(studentEmail).trim().toLowerCase();
-
-  try {
-    const repRes = await pool.query('SELECT payload FROM reports WHERE "studentEmail" = $1', [se]);
-    if (repRes.rows.length === 0) return res.status(404).json({ error: '报告不存在' });
-    const payload = repRes.rows[0].payload;
-    payload.aiReport = aiReport;
-    await pool.query(`UPDATE reports SET payload = $1, "updatedAt" = $2 WHERE "studentEmail" = $3`, [JSON.stringify(payload), Date.now(), se]);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: '服务器数据库异常' });
+    res.status(500).json({ error: '生成失败，请稍后再试', code: 'AI_ERROR' });
+  } finally {
+    aiInFlight.delete(pe);
   }
 });
 
 // 启动服务
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log('===========================================');
   console.log('  QBTI 家长端独立服务器已启动');
   console.log('  端口: ' + PORT);
@@ -442,4 +591,5 @@ app.listen(PORT, () => {
   console.log('  邮件: ' + (AGENTMAIL_API_KEY ? '✅ 已启用' : '⚠️ 未配置'));
   console.log('  DeepSeek: ' + (DEEPSEEK_API_KEY ? '✅ 已启用' : '⚠️ 未配置'));
   console.log('===========================================');
+  await initDB();
 });
