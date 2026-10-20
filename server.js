@@ -175,6 +175,14 @@ async function initDB() {
       "updatedAt" BIGINT NOT NULL,
       "updatedBy" VARCHAR(255)
     );`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS admin_quiz_records (
+      id SERIAL PRIMARY KEY,
+      "studentEmail" VARCHAR(255) NOT NULL,
+      "quizTs" BIGINT NOT NULL,
+      payload JSONB,
+      "createdAt" BIGINT NOT NULL,
+      UNIQUE("studentEmail", "quizTs")
+    );`);
     const salt = genSalt();
     await pool.query(
       `INSERT INTO admin_policy (id, enabled, salt, "passwordHash", "updatedAt", "updatedBy")
@@ -735,6 +743,142 @@ app.post('/api/admin/student-admin', requireAdmin, async (req, res) => {
   } catch (err) {
     console.error('[学生端管理员策略] 更新失败:', err.message);
     res.status(500).json({ error: '服务器数据库异常' });
+  }
+});
+
+/* ============================================================
+   管理员：学生端管理员的全部历史问卷
+   ============================================================ */
+app.get('/api/admin/student-admin-records', requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT id, "quizTs", "createdAt",
+             payload->>'code' AS code,
+             (payload->>'aiReport' IS NOT NULL) AS "hasAI",
+             payload->>'aiReportLang' AS "aiLang",
+             payload->>'aiReportSource' AS "aiSource"
+      FROM admin_quiz_records
+      WHERE LOWER("studentEmail") = 'administrator@qbti.local'
+      ORDER BY "quizTs" DESC
+      LIMIT 200
+    `);
+    const list = r.rows.map(row => ({
+      id: Number(row.id),
+      quizTs: Number(row.quizTs) || null,
+      createdAt: Number(row.createdAt) || null,
+      code: row.code || '',
+      hasAI: !!row.hasAI,
+      aiLang: row.aiLang || null,
+      aiSource: row.aiSource || null
+    }));
+    res.json({ success: true, list });
+  } catch (err) {
+    console.error('[学生端管理员历史] 读取失败:', err.message);
+    res.status(500).json({ error: '服务器数据库异常' });
+  }
+});
+
+app.get('/api/admin/student-admin-record/:id', requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: '记录 ID 不正确' });
+  try {
+    const r = await pool.query('SELECT * FROM admin_quiz_records WHERE id = $1', [id]);
+    const row = r.rows[0];
+    if (!row) return res.status(404).json({ error: '记录不存在' });
+    if (String(row.studentEmail).toLowerCase() !== 'administrator@qbti.local') {
+      return res.status(403).json({ error: '不是学生端管理员记录' });
+    }
+    res.json({
+      success: true,
+      record: {
+        id: Number(row.id),
+        quizTs: Number(row.quizTs) || null,
+        createdAt: Number(row.createdAt) || null,
+        payload: row.payload
+      }
+    });
+  } catch (err) {
+    console.error('[学生端管理员历史] 单条读取失败:', err.message);
+    res.status(500).json({ error: '服务器数据库异常' });
+  }
+});
+
+app.post('/api/admin/student-admin-record/:id/generate', requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const lang = AI_LANGS.includes(req.body && req.body.lang) ? req.body.lang : 'zh-CN';
+  if (!id) return res.status(400).json({ error: '记录 ID 不正确' });
+  if (!DEEPSEEK_API_KEY) return res.status(500).json({ error: '未配置 DEEPSEEK_API_KEY', code: 'NO_KEY' });
+  if (!QBTI) return res.status(500).json({ error: '服务端提示词模块未加载', code: 'NO_CORE' });
+
+  const adminEmail = 'admin@qbti.local';
+  try {
+    const r = await pool.query('SELECT * FROM admin_quiz_records WHERE id = $1', [id]);
+    const row = r.rows[0];
+    if (!row) return res.status(404).json({ error: '记录不存在', code: 'NO_RECORD' });
+    if (String(row.studentEmail).toLowerCase() !== 'administrator@qbti.local') {
+      return res.status(403).json({ error: '不是学生端管理员记录', code: 'NOT_ADMIN_RECORD' });
+    }
+    const payload = row.payload || {};
+    const cachedLang = payload.aiReportLang || 'zh-CN';
+    const cachedSource = payload.aiReportSource || 'ai';
+    if (payload.aiReport && cachedSource === 'ai' && cachedLang === lang) {
+      return res.json({ success: true, text: payload.aiReport, lang: lang, cached: true, id: id });
+    }
+    if (aiInFlight.has(adminEmail)) {
+      return res.status(429).json({ error: '正在生成，请稍候', code: 'IN_FLIGHT' });
+    }
+    const cooldownKey = adminEmail + '|record:' + id;
+    const last = aiCooldown.get(cooldownKey) || 0;
+    const now = Date.now();
+    if (now - last < AI_COOLDOWN_MS) {
+      const wait = Math.ceil((AI_COOLDOWN_MS - (now - last)) / 1000);
+      return res.status(429).json({ error: '请求过于频繁，请稍后再试', code: 'COOLDOWN', wait });
+    }
+    const day = localDay();
+    const used = await getAIUsage(adminEmail, day);
+    if (used >= AI_DAILY_LIMIT) {
+      return res.status(429).json({ error: '今日生成次数已达上限', code: 'DAILY_LIMIT', limit: AI_DAILY_LIMIT });
+    }
+    const prompt = buildServerPrompt(payload, lang);
+    if (!prompt) return res.status(500).json({ error: '构建提示词失败', code: 'PROMPT_FAILED' });
+
+    aiInFlight.add(adminEmail);
+    aiCooldown.set(cooldownKey, now);
+
+    const response = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DEEPSEEK_API_KEY },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: '你是一位擅长用隐喻理解青少年学习状态的教育引导顾问，语气温暖、具体、不评判。你的报告面向家长，帮助家长理解孩子，而不是评判孩子。' },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.85,
+        max_tokens: 2400,
+        stream: false
+      })
+    });
+    if (!response.ok) throw new Error('DeepSeek API 返回错误');
+    const data = await response.json();
+    const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+    if (!content) throw new Error('API 返回内容为空');
+
+    payload.aiReport = content;
+    payload.aiReportLang = lang;
+    payload.aiReportSource = 'ai';
+    payload.aiReportAt = Date.now();
+    await pool.query(
+      'UPDATE admin_quiz_records SET payload = $1, "createdAt" = $2 WHERE id = $3',
+      [JSON.stringify(payload), Date.now(), id]
+    );
+    try { await incAIUsage(adminEmail, day); } catch(e){}
+    res.json({ success: true, text: content, lang: lang, cached: false, id: id });
+  } catch (err) {
+    console.error('[学生端管理员历史] AI 生成失败:', err.message);
+    res.status(500).json({ error: '生成失败，请稍后再试', code: 'AI_ERROR' });
+  } finally {
+    aiInFlight.delete(adminEmail);
   }
 });
 

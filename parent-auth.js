@@ -834,9 +834,9 @@
         <div class="admin-policy-note" id="adminPolicyNote">学生端 Administrator 的登录与权限由此处控制；停用后学生端管理员无法登录，已登录会话会在下一次校验时失效。</div>
       </div>
       <div class="admin-policy">
-        <div class="admin-policy-head"><span>学生端管理员 · 最新问卷记录</span><span class="admin-policy-status" id="adminStudentReportStatus">加载中…</span></div>
-        <div class="admin-policy-note" id="adminStudentReportInfo">服务器只保留最近一次同步记录；家长端管理员可直接查看或代生成 AI 报告。</div>
-        <div class="admin-student-actions" id="adminStudentReportActions"></div>
+        <div class="admin-policy-head"><span>学生端管理员 · 全部问卷记录</span><span class="admin-policy-status" id="adminStudentReportStatus">加载中…</span></div>
+        <div class="admin-policy-note" id="adminStudentReportInfo">学生端管理员每次完成问卷都会同步一条记录；家长端管理员可逐条查看或代生成 AI 报告。</div>
+        <div class="admin-record-list" id="adminStudentRecordList"><div class="empty-state">加载中…</div></div>
       </div>
       <div class="admin-toolbar">
         <input id="adminSearch" class="admin-search" placeholder="搜索学生邮箱 / 用户名" />
@@ -864,7 +864,7 @@
     });
     loadAdminData('');
     loadStudentAdminPolicy();
-    loadStudentAdminReport();
+    loadStudentAdminRecords();
   }
   async function loadStudentAdminPolicy(){
     const status = $('adminPolicyStatus');
@@ -918,59 +918,99 @@
       loadStudentAdminPolicy();
     } catch(err){ toast(err.message || '重置失败', 'err'); }
   }
-  async function loadStudentAdminReport(){
+  async function loadStudentAdminRecords(){
     const status = $('adminStudentReportStatus');
     const info = $('adminStudentReportInfo');
-    const actions = $('adminStudentReportActions');
+    const listEl = $('adminStudentRecordList');
     try {
-      const res = await adminFetch('/api/admin/report/administrator%40qbti.local');
+      const res = await adminFetch('/api/admin/student-admin-records');
       if(!res) return;
-      if(res.status === 404){
-        if(status){ status.textContent = '暂无记录'; status.className = 'admin-policy-status off'; }
-        if(info) info.textContent = '学生端管理员尚未同步过问卷记录。';
-        if(actions) actions.innerHTML = '';
-        return;
-      }
       const data = await res.json();
       if(!res.ok || !data.success) throw new Error(data.error || '读取失败');
-      const p = data.report.payload || {};
-      const code = p.code || (p.baseCode ? p.baseCode + '-' + (p.suffixLetter || '') : '—');
-      const hasAI = !!p.aiReport;
+      const rows = data.list || [];
       if(status){
-        status.textContent = hasAI ? 'AI 已生成' : '已同步';
-        status.className = 'admin-policy-status ' + (hasAI ? 'on' : '');
+        status.textContent = rows.length ? (rows.length + ' 条') : '暂无记录';
+        status.className = 'admin-policy-status ' + (rows.length ? 'on' : 'off');
       }
-      if(info) info.textContent = '类型 ' + code + ' · 更新时间 ' + formatTime(data.report.updatedAt) + ' · AI ' + (hasAI ? (p.aiReportLang || 'zh-CN') : '未生成');
-      if(actions){
-        actions.innerHTML = '<button id="adminViewStudentReport">查看记录</button><button id="adminGenStudentReport">代生成 AI 报告</button>';
-        $('adminViewStudentReport').addEventListener('click', () => showAdminReport('administrator@qbti.local'));
-        $('adminGenStudentReport').addEventListener('click', () => adminGenerateFor('administrator@qbti.local', $('adminGenStudentReport')));
+      if(info) info.textContent = '学生端管理员每次完成问卷都会同步一条记录；可逐条查看或代生成 AI 报告。';
+      if(!listEl) return;
+      if(rows.length === 0){
+        listEl.innerHTML = '<div class="empty-state">还没有同步记录。学生端管理员完成一次问卷后会自动出现。</div>';
+        return;
       }
+      listEl.innerHTML = rows.map(r => {
+        const code = r.code || '—';
+        const date = r.quizTs ? formatTime(r.quizTs) : (r.createdAt ? formatTime(r.createdAt) : '—');
+        const ai = r.hasAI ? ((r.aiSource === 'local') ? '本地模板' : ('AI ' + (r.aiLang || 'zh-CN'))) : 'AI 未生成';
+        return '<div class="admin-record">'
+          + '<div class="admin-record-main"><b>' + escapeHTML(code) + '</b><span>' + escapeHTML(date) + ' · ' + escapeHTML(ai) + '</span></div>'
+          + '<div class="admin-student-actions">'
+          + '<button data-record-act="view" data-id="' + r.id + '">查看</button>'
+          + '<button data-record-act="gen" data-id="' + r.id + '">代生成 AI</button>'
+          + '</div></div>';
+      }).join('');
+      listEl.querySelectorAll('button[data-record-act]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.dataset.id;
+          if(btn.dataset.recordAct === 'view') showAdminRecord(id);
+          if(btn.dataset.recordAct === 'gen') adminGenerateRecord(id, btn);
+        });
+      });
     } catch(err){
       if(status){ status.textContent = '读取失败'; status.className = 'admin-policy-status off'; }
       if(info) info.textContent = err.message || '读取失败';
-      if(actions) actions.innerHTML = '';
+      if(listEl) listEl.innerHTML = '<div class="empty-state" style="color:#FF8FA0;">' + escapeHTML(err.message || '读取失败') + '</div>';
     }
   }
-  async function adminGenerateFor(email, btn){
+
+  async function adminGenerateRecord(id, btn){
     if(btn){ btn.disabled = true; btn.textContent = '生成中…'; }
     try {
-      const res = await fetch(API_BASE + '/api/generate-ai-report', {
+      const res = await fetch(API_BASE + '/api/admin/student-admin-record/' + encodeURIComponent(id) + '/generate', {
         method: 'POST',
         headers: Object.assign({ 'Content-Type': 'application/json' }, adminHeaders()),
-        body: JSON.stringify({ studentEmail: email, lang: currentLang })
+        body: JSON.stringify({ lang: currentLang })
       });
       if(res.status === 401){ adminExpired(); return; }
       const data = await res.json().catch(() => ({}));
       if(!res.ok || !data.success) throw new Error(aiErrorText(data));
       toast(data.cached ? '已读取现有 AI 报告' : 'AI 报告已生成', 'ok');
-      loadStudentAdminReport();
-      if($('adminList')) loadAdminData($('adminSearch') ? $('adminSearch').value : '');
+      loadStudentAdminRecords();
     } catch(err){
       toast(err.message || '生成失败', 'err');
-      if(btn){ btn.disabled = false; btn.textContent = '代生成 AI 报告'; }
+      if(btn){ btn.disabled = false; btn.textContent = '代生成 AI'; }
     }
   }
+
+  async function showAdminRecord(id){
+    currentView = 'adminReport';
+    app.innerHTML = '<div class="empty-state">正在加载记录…</div>';
+    try {
+      const res = await adminFetch('/api/admin/student-admin-record/' + encodeURIComponent(id));
+      if(!res) return;
+      const data = await res.json();
+      if(!res.ok || !data.success) throw new Error(data.error || '加载失败');
+      const p = data.record.payload || {};
+      const fullResult = p.fullResult || {
+        letters: p.baseCode ? p.baseCode.split('') : [],
+        suffix: { letter: p.suffixLetter || 'E', name: p.suffixName || '' },
+        dimGroupRatio: p.dimGroupRatio || {}, dimLeadInfo: p.dimLeadInfo || {},
+        suffixRatio: p.suffixRatio || {}, suffixGap: p.suffixGap || 0, dominanceScore: {}
+      };
+      const extra = Object.assign({}, p, {
+        studentEmail: 'administrator@qbti.local',
+        aiReportLang: p.aiReportLang || null,
+        aiReportSource: p.aiReportSource || 'ai',
+        adminView: true,
+        recordId: Number(id)
+      });
+      renderReportView(fullResult, p.validity, p.aiReport, data.record.quizTs || data.record.createdAt, extra);
+    } catch(err){
+      app.innerHTML = '<button class="back-btn" id="btnBack">← 返回</button><div class="card" style="text-align:center;color:#FF8FA0;">加载失败：' + escapeHTML(err.message) + '</div>';
+      $('btnBack').addEventListener('click', renderAdminDashboard);
+    }
+  }
+
   async function loadAdminData(q){
     try {
       const [ovRes, listRes] = await Promise.all([
@@ -1379,7 +1419,7 @@
     return (data && data.error) || T('error');
   }
 
-  async function generateAIReport(studentEmail, btn, adminView){
+  async function generateAIReport(studentEmail, btn, adminView, recordId){
     if(isGenerating) return;
     if(!studentEmail){ toast(T('noReport'), 'err'); return; }
     const wasRegen = !!(lastReport && lastReport.aiReport && (lastReport.extra.aiReportSource || 'ai') === 'ai');
@@ -1392,15 +1432,22 @@
     try {
       const headers = { 'Content-Type': 'application/json' };
       if(adminView) Object.assign(headers, adminHeaders());
-      const requestBody = adminView
-        ? { studentEmail, lang: currentLang }
-        : { parentEmail: currentParent.email, studentEmail, lang: currentLang };
-      const apiRes = await fetch(API_BASE + '/api/generate-ai-report', {
+      let apiUrl = API_BASE + '/api/generate-ai-report';
+      let requestBody;
+      if(recordId){
+        apiUrl = API_BASE + '/api/admin/student-admin-record/' + encodeURIComponent(recordId) + '/generate';
+        requestBody = { lang: currentLang };
+      } else if(adminView){
+        requestBody = { studentEmail, lang: currentLang };
+      } else {
+        requestBody = { parentEmail: currentParent.email, studentEmail, lang: currentLang };
+      }
+      const apiRes = await fetch(apiUrl, {
         method: 'POST',
         headers,
         body: JSON.stringify(requestBody)
       });
-      if(adminView && apiRes.status === 401){ adminExpired(); return; }
+      if((adminView || recordId) && apiRes.status === 401){ adminExpired(); return; }
       const apiData = await apiRes.json().catch(() => ({}));
       if(!apiRes.ok || !apiData.success) throw new Error(aiErrorText(apiData));
       if(apiData.cached) toast(T('cached'), 'info');
@@ -1431,6 +1478,7 @@
   function renderReportView(res, validity, aiReportText, updatedAt, extraData){
     const lang = currentLang;
     const adminView = !!(extraData && extraData.adminView);
+    const recordId = (extraData && extraData.recordId) || null;
     const pack = PT[lang] || PT['zh-CN'];
     const baseCode = res.letters.join('');
     const typeName = (lang === 'zh-CN' || lang === 'zh-TW') ? (Q.TYPE_NAMES[baseCode] || '') : '';
@@ -1503,7 +1551,7 @@
     $('btnBack').addEventListener('click', goBack);
     $('btnBackBottom').addEventListener('click', goBack);
     const genBtn = $('btnGenAI');
-    if(genBtn) genBtn.addEventListener('click', () => generateAIReport(genBtn.dataset.student, genBtn, adminView));
+    if(genBtn) genBtn.addEventListener('click', () => generateAIReport(genBtn.dataset.student, genBtn, adminView, recordId));
   }
 
   function init(){
