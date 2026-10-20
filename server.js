@@ -525,38 +525,72 @@ app.post('/api/bind/accept', async (req, res) => {
   const pe = String(parentEmail).trim().toLowerCase();
   const c = String(code).trim().toUpperCase();
 
+  const client = await pool.connect();
   try {
-    const pCheck = await pool.query('SELECT email FROM parents WHERE email = $1', [pe]);
-    if (pCheck.rows.length === 0) return res.status(404).json({ error: '家长账号不存在' });
+    await client.query('BEGIN');
 
-    const invRes = await pool.query('SELECT * FROM invites WHERE code = $1', [c]);
+    const pCheck = await client.query('SELECT email FROM parents WHERE email = $1', [pe]);
+    if (pCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: '家长账号不存在' });
+    }
+
+    const invRes = await client.query('SELECT * FROM invites WHERE code = $1 FOR UPDATE', [c]);
     const inv = invRes.rows[0];
-    if (!inv) return res.status(404).json({ error: '邀请码不存在' });
-    if (inv.used) return res.status(410).json({ error: '邀请码已被使用' });
+    if (!inv) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: '邀请码不存在' });
+    }
+    if (inv.used) {
+      await client.query('ROLLBACK');
+      return res.status(410).json({ error: '邀请码已被使用' });
+    }
     if (Number(inv.expiresAt) < Date.now()) {
-      await pool.query('DELETE FROM invites WHERE code = $1', [c]);
+      await client.query('DELETE FROM invites WHERE code = $1', [c]);
+      await client.query('COMMIT');
       return res.status(410).json({ error: '邀请码已过期' });
     }
 
     const se = inv.studentEmail;
-    const countRes = await pool.query('SELECT COUNT(*) FROM bindings WHERE "studentEmail" = $1', [se]);
-    if (parseInt(countRes.rows[0].count, 10) >= 2) return res.status(409).json({ error: '该学生已达到绑定上限' });
+    /* 同一学生的绑定串行化，硬性限制最多 2 位家长；家长端绑定学生数量不限 */
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [se]);
+    const countRes = await client.query('SELECT COUNT(*) FROM bindings WHERE "studentEmail" = $1', [se]);
+    if (parseInt(countRes.rows[0].count, 10) >= 2) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: '该学生已达到绑定上限（最多绑定 2 位家长）' });
+    }
 
-    const bindCheck = await pool.query('SELECT id FROM bindings WHERE "studentEmail" = $1 AND "parentEmail" = $2', [se, pe]);
+    const bindCheck = await client.query('SELECT id FROM bindings WHERE "studentEmail" = $1 AND "parentEmail" = $2', [se, pe]);
     if (bindCheck.rows.length > 0) {
-      await pool.query('UPDATE invites SET used = true WHERE code = $1', [c]);
+      await client.query('UPDATE invites SET used = true WHERE code = $1', [c]);
+      await client.query('COMMIT');
       return res.status(409).json({ error: '您已绑定该学生' });
     }
 
-    await pool.query(
+    await client.query(
       `INSERT INTO bindings ("studentEmail", "studentUsername", "parentEmail", "boundAt") VALUES ($1, $2, $3, $4)`,
       [se, inv.studentUsername || '', pe, Date.now()]
     );
-    await pool.query('UPDATE invites SET used = true WHERE code = $1', [c]);
+    await client.query('UPDATE invites SET used = true WHERE code = $1', [c]);
+    await client.query('COMMIT');
 
-    res.json({ success: true, studentEmail: se, studentUsername: inv.studentUsername || '' });
+    const totalRes = await pool.query('SELECT COUNT(*) FROM bindings WHERE "parentEmail" = $1', [pe]);
+    res.json({
+      success: true,
+      studentEmail: se,
+      studentUsername: inv.studentUsername || '',
+      parentStudentCount: parseInt(totalRes.rows[0].count, 10),
+      maxStudents: null
+    });
   } catch (err) {
+    try { await client.query('ROLLBACK'); } catch(e){}
+    if (err.code === 'STUDENT_BIND_LIMIT' || String(err.message || '').indexOf('STUDENT_BIND_LIMIT') >= 0) {
+      return res.status(409).json({ error: '该学生已达到绑定上限（最多绑定 2 位家长）' });
+    }
+    console.error('[绑定] 接受邀请失败:', err.message);
     res.status(500).json({ error: '服务器数据库异常' });
+  } finally {
+    client.release();
   }
 });
 
@@ -578,7 +612,7 @@ app.get('/api/parent/students', async (req, res) => {
       hasReport: !!row.reportUpdatedAt,
       reportUpdatedAt: row.reportUpdatedAt ? Number(row.reportUpdatedAt) : null
     }));
-    res.json({ success: true, list });
+    res.json({ success: true, list, maxStudents: null, unlimited: true });
   } catch (err) {
     res.status(500).json({ error: '服务器数据库异常' });
   }

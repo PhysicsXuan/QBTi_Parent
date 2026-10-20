@@ -1121,7 +1121,7 @@
         </div>
       </div>
       <div class="topbar" style="margin-bottom:24px;">
-        <div style="font-size:13px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;">已绑定的孩子</div>
+        <div style="font-size:13px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;">已绑定的孩子（数量不限）</div>
         <button class="add-student-btn" id="btnAddStudent">+ 绑定孩子</button>
       </div>
       <div class="student-list" id="studentList">
@@ -1294,7 +1294,8 @@
     mask.style.cssText = 'position:fixed;inset:0;background:rgba(3,4,12,.86);backdrop-filter:blur(10px);z-index:300;display:grid;place-items:center;padding:20px;';
     mask.innerHTML = `
       <div style="width:100%;max-width:400px;padding:30px 26px;border-radius:20px;border:1px solid rgba(255,255,255,.1);background:#0B0D1C;text-align:center;">
-        <div style="font-size:11px;letter-spacing:.22em;color:var(--muted);text-transform:uppercase;margin-bottom:14px;">Bind Child · 绑定孩子</div>
+        <div style="font-size:11px;letter-spacing:.22em;color:var(--muted);text-transform:uppercase;margin-bottom:8px;">Bind Child · 绑定孩子</div>
+        <div style="font-size:12px;line-height:1.7;color:var(--muted);margin-bottom:14px;">每个学生最多绑定 2 位家长；家长账号绑定学生数量不限。</div>
         <button id="btnStartScan" class="scan-btn" style="width:100%;padding:12px;border-radius:11px;border:1px dashed var(--q-color);background:rgba(var(--q-r),var(--q-g),var(--q-b),.08);color:var(--q-color);font-size:14px;font-weight:600;cursor:pointer;margin-bottom:16px;">📷 打开摄像头扫码</button>
         <div id="reader-container" style="display:none;"><div id="reader"></div><button id="btnStopScan" style="width:100%;padding:10px;background:transparent;border:none;color:var(--muted);font-size:12px;cursor:pointer;">取消扫码</button></div>
         <input id="bindCodeInput" type="text" maxlength="6" placeholder="ABC123" style="width:100%;padding:14px 18px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#fff;font-size:20px;font-weight:700;letter-spacing:.24em;text-align:center;text-transform:uppercase;margin-bottom:14px;" />
