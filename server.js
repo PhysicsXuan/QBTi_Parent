@@ -65,6 +65,34 @@ const AI_LANGS = ['zh-CN', 'zh-TW', 'en', 'es', 'pt', 'ko', 'ja', 'fr'];
 const aiInFlight = new Set();
 const aiCooldown = new Map();
 
+/* ---------- 管理员账户（家长端最高权限） ---------- */
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123456';
+const ADMIN_TOKEN_TTL = 2 * 60 * 60 * 1000;
+const adminTokens = new Map();
+
+function safeEqual(a, b){
+  const ba = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
+}
+function adminTokenFromReq(req){
+  const h = String(req.headers.authorization || '');
+  if(h.indexOf('Bearer ') === 0) return h.slice(7).trim();
+  return String(req.headers['x-admin-token'] || '');
+}
+function isAdminToken(token){
+  const exp = adminTokens.get(token);
+  if(!exp) return false;
+  if(exp < Date.now()){ adminTokens.delete(token); return false; }
+  return true;
+}
+function requireAdmin(req, res, next){
+  if(!isAdminToken(adminTokenFromReq(req))){
+    return res.status(401).json({ error: '管理员登录已过期，请重新登录', code: 'ADMIN_AUTH' });
+  }
+  next();
+}
+
 /* 报告输出语言：由服务端强制覆盖，客户端只传语言代码 */
 const AI_LANG_META = {
   'zh-TW': { name: '繁體中文', instr: '請使用繁體中文撰寫整份報告，不要使用簡體中文。' },
@@ -466,28 +494,167 @@ app.get('/api/parent/report/:studentEmail', async (req, res) => {
 });
 
 /* ============================================================
+   管理员接口（Administrator / ADMIN_PASSWORD）
+   ============================================================ */
+app.post('/api/admin/login', (req, res) => {
+  const { password } = req.body || {};
+  if (!password) return res.status(400).json({ error: '请输入管理员密码' });
+  if (!safeEqual(password, ADMIN_PASSWORD)) {
+    return res.status(401).json({ error: '管理员密码不正确', code: 'ADMIN_AUTH' });
+  }
+  const token = crypto.randomBytes(24).toString('hex');
+  adminTokens.set(token, Date.now() + ADMIN_TOKEN_TTL);
+  res.json({
+    success: true,
+    token,
+    user: { email: 'administrator@qbti.local', username: 'Administrator', phone: '', role: 'admin' }
+  });
+});
+
+app.get('/api/admin/overview', requireAdmin, async (req, res) => {
+  try {
+    const counts = await pool.query(`
+      SELECT
+        (SELECT COUNT(*) FROM parents) AS parents,
+        (SELECT COUNT(*) FROM student_emails) AS students,
+        (SELECT COUNT(*) FROM bindings) AS bindings,
+        (SELECT COUNT(*) FROM reports) AS reports,
+        (SELECT COUNT(*) FROM reports WHERE payload->>'aiReport' IS NOT NULL) AS "aiReports"
+    `);
+    let todayAI = 0;
+    try {
+      const u = await pool.query('SELECT COALESCE(SUM(count), 0) AS used FROM ai_usage WHERE day = $1', [localDay()]);
+      todayAI = Number(u.rows[0] && u.rows[0].used) || 0;
+    } catch(e){}
+    const row = counts.rows[0] || {};
+    res.json({
+      success: true,
+      overview: {
+        parents: Number(row.parents) || 0,
+        students: Number(row.students) || 0,
+        bindings: Number(row.bindings) || 0,
+        reports: Number(row.reports) || 0,
+        aiReports: Number(row.aiReports) || 0,
+        todayAI
+      }
+    });
+  } catch (err) {
+    console.error('[管理员概览] 失败:', err.message);
+    res.status(500).json({ error: '服务器数据库异常' });
+  }
+});
+
+app.get('/api/admin/students', requireAdmin, async (req, res) => {
+  const q = String(req.query.q || '').trim().toLowerCase();
+  const like = '%' + q + '%';
+  try {
+    const result = await pool.query(`
+      SELECT s.email, s.username,
+             COALESCE(to_jsonb(s)->>'phone', '') AS phone,
+             s."createdAt",
+             (to_jsonb(s)->>'passwordHash' IS NOT NULL) AS "hasPassword",
+             r."updatedAt" AS "reportUpdatedAt",
+             (r.payload->>'aiReport' IS NOT NULL) AS "hasAI",
+             (r.payload->>'aiReportLang') AS "aiLang",
+             (r.payload->>'code') AS "code",
+             (SELECT COUNT(*) FROM bindings b WHERE b."studentEmail" = s.email) AS "boundCount"
+      FROM student_emails s
+      LEFT JOIN reports r ON r."studentEmail" = s.email
+      WHERE ($1 = '' OR LOWER(s.email) LIKE $2 OR LOWER(COALESCE(s.username, '')) LIKE $2)
+      ORDER BY s."createdAt" DESC NULLS LAST
+      LIMIT 100
+    `, [q, like]);
+    const list = result.rows.map(row => ({
+      email: row.email,
+      username: row.username || '',
+      phone: row.phone || '',
+      createdAt: row.createdAt ? Number(row.createdAt) : null,
+      hasPassword: !!row.hasPassword,
+      hasReport: !!row.reportUpdatedAt,
+      reportUpdatedAt: row.reportUpdatedAt ? Number(row.reportUpdatedAt) : null,
+      hasAI: !!row.hasAI,
+      aiLang: row.aiLang || null,
+      code: row.code || null,
+      boundCount: Number(row.boundCount) || 0
+    }));
+    res.json({ success: true, list });
+  } catch (err) {
+    console.error('[管理员学生列表] 失败:', err.message);
+    res.status(500).json({ error: '服务器数据库异常' });
+  }
+});
+
+app.get('/api/admin/report/:studentEmail', requireAdmin, async (req, res) => {
+  const se = String(req.params.studentEmail || '').trim().toLowerCase();
+  if (!se) return res.status(400).json({ error: '缺少邮箱' });
+  try {
+    const repRes = await pool.query('SELECT * FROM reports WHERE "studentEmail" = $1', [se]);
+    const r = repRes.rows[0];
+    if (!r) return res.status(404).json({ error: '该学生尚未提交报告' });
+    res.json({
+      success: true,
+      report: {
+        studentEmail: r.studentEmail,
+        studentUsername: r.studentUsername,
+        payload: r.payload,
+        updatedAt: Number(r.updatedAt)
+      }
+    });
+  } catch (err) {
+    console.error('[管理员报告] 失败:', err.message);
+    res.status(500).json({ error: '服务器数据库异常' });
+  }
+});
+
+app.post('/api/admin/clear-ai', requireAdmin, async (req, res) => {
+  const se = String((req.body && req.body.studentEmail) || '').trim().toLowerCase();
+  if (!se) return res.status(400).json({ error: '缺少学生邮箱' });
+  try {
+    const repRes = await pool.query('SELECT payload FROM reports WHERE "studentEmail" = $1', [se]);
+    if (repRes.rows.length === 0) return res.status(404).json({ error: '报告不存在' });
+    const payload = repRes.rows[0].payload || {};
+    delete payload.aiReport;
+    delete payload.aiReportLang;
+    delete payload.aiReportSource;
+    delete payload.aiReportAt;
+    await pool.query(
+      'UPDATE reports SET payload = $1, "updatedAt" = $2 WHERE "studentEmail" = $3',
+      [JSON.stringify(payload), Date.now(), se]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[管理员清除 AI] 失败:', err.message);
+    res.status(500).json({ error: '服务器数据库异常' });
+  }
+});
+
+/* ============================================================
    API: AI 代理生成
    屏障：绑定校验 + 同语言缓存 + 并发锁 + 60 秒冷却 + 每日上限
    客户端只传 parentEmail / studentEmail / lang，不能传 prompt
    ============================================================ */
 app.post('/api/generate-ai-report', async (req, res) => {
   const { parentEmail, studentEmail, lang } = req.body || {};
-  const pe = String(parentEmail || '').trim().toLowerCase();
+  let pe = String(parentEmail || '').trim().toLowerCase();
   const se = String(studentEmail || '').trim().toLowerCase();
   const lg = AI_LANGS.includes(lang) ? lang : 'zh-CN';
+  const adminReq = isAdminToken(adminTokenFromReq(req));
+  if (adminReq && !pe) pe = 'admin@qbti.local';
 
   if (!pe || !se) return res.status(400).json({ error: '参数不完整', code: 'BAD_REQUEST' });
   if (!DEEPSEEK_API_KEY) return res.status(500).json({ error: '未配置 DEEPSEEK_API_KEY', code: 'NO_KEY' });
   if (!QBTI) return res.status(500).json({ error: '服务端提示词模块未加载', code: 'NO_CORE' });
 
   try {
-    /* 1) 必须是真实绑定关系，阻止任意邮箱刷接口 */
-    const bind = await pool.query(
-      'SELECT id FROM bindings WHERE "studentEmail" = $1 AND "parentEmail" = $2',
-      [se, pe]
-    );
-    if (bind.rows.length === 0) {
-      return res.status(403).json({ error: '未绑定该学生', code: 'NOT_BOUND' });
+    /* 1) 普通家长必须已绑定；管理员 token 可跨学生生成 */
+    if (!adminReq) {
+      const bind = await pool.query(
+        'SELECT id FROM bindings WHERE "studentEmail" = $1 AND "parentEmail" = $2',
+        [se, pe]
+      );
+      if (bind.rows.length === 0) {
+        return res.status(403).json({ error: '未绑定该学生', code: 'NOT_BOUND' });
+      }
     }
 
     /* 2) 同语言已有 AI 报告：直接返回缓存，零 token */

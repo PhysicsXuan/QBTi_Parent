@@ -235,6 +235,8 @@
     /* 只重绘，不触发生成；已有报告保留，用户可显式选择“用当前语言重新生成” */
     if(currentView === 'report' && lastReport){
       renderReportView(lastReport.res, lastReport.validity, lastReport.aiReport, lastReport.updatedAt, lastReport.extra);
+    } else if(currentView === 'admin' && currentParent && currentParent.role === 'admin'){
+      renderAdminDashboard();
     } else if(currentView === 'dashboard' && currentParent){
       renderDashboard();
     } else {
@@ -305,11 +307,11 @@
             <button type="button" data-tab="register">注册</button>
           </div>
           <h2 class="auth-title">家长登录</h2>
-          <p class="auth-subtitle">用注册邮箱登录，查看孩子的量子态报告</p>
+          <p class="auth-subtitle">用注册邮箱登录，查看孩子的量子态报告；管理员可用 Administrator 登录</p>
           <form data-form="login" autocomplete="on">
             <div class="auth-field" data-name="identifier">
-              <label>邮箱</label>
-              <input name="identifier" type="email" placeholder="your@email.com" autocomplete="username" />
+              <label>邮箱 / 管理员账号</label>
+              <input name="identifier" type="text" placeholder="your@email.com / Administrator" autocomplete="username" />
               <div class="auth-err"></div>
             </div>
             <div class="auth-field" data-name="password">
@@ -689,8 +691,38 @@
     const btn = form.querySelector('.auth-submit');
     clearFormErrors(form);
 
-    if(!data.identifier){ setFieldError(form, 'identifier', '请输入邮箱'); return; }
+    if(!data.identifier){ setFieldError(form, 'identifier', '请输入邮箱或管理员账号'); return; }
     if(!data.password){ setFieldError(form, 'password', '请输入密码'); return; }
+
+    const idLower = String(data.identifier || '').trim().toLowerCase();
+    if(idLower === 'administrator' || idLower === 'administrator@qbti.local'){
+      btn.disabled = true;
+      btn.textContent = '登录中…';
+      try {
+        const res = await fetch(API_BASE + '/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: data.password })
+        });
+        const r = await res.json();
+        if(!res.ok || !r.success){
+          setFieldError(form, 'password', r.error || '管理员密码不正确');
+          btn.disabled = false;
+          btn.textContent = '登录';
+          return;
+        }
+        const admin = Object.assign({}, r.user, { adminToken: r.token });
+        saveSession(admin);
+        currentParent = admin;
+        toast('管理员已登录', 'ok');
+        setTimeout(() => { closeAuth(); renderHome(); }, 300);
+      } catch(err){
+        toast('无法连接服务器', 'err');
+        btn.disabled = false;
+        btn.textContent = '登录';
+      }
+      return;
+    }
 
     btn.disabled = true;
     btn.textContent = '登录中…';
@@ -721,6 +753,17 @@
 
   function renderHome(){
     if(!currentParent){ navTag.textContent = '未登录'; renderGate(); return; }
+    if(currentParent.role === 'admin'){
+      if(!currentParent.adminToken){
+        clearSession();
+        currentParent = null;
+        renderGate();
+        return;
+      }
+      navTag.textContent = 'ADMIN';
+      renderAdminDashboard();
+      return;
+    }
     navTag.textContent = currentParent.username;
     renderDashboard();
   }
@@ -734,10 +777,175 @@
         <p>登录家长账户后，即可查看孩子的量子态报告。</p>
         <button id="btnShowLogin" style="max-width:200px;margin:0 auto 12px;display:block;">登录家长账户</button>
         <button id="btnShowRegister" style="max-width:200px;margin:0 auto;display:block;background:transparent;border:1px solid rgba(255,255,255,.14);color:#fff;">注册家长账户</button>
+        <div class="admin-entry"><a id="btnAdminEntry">管理员登录（Administrator）</a></div>
       </div>
     `;
     $('btnShowLogin').addEventListener('click', () => openAuth('login'));
     $('btnShowRegister').addEventListener('click', () => openAuth('register'));
+    $('btnAdminEntry').addEventListener('click', () => {
+      openAuth('login');
+      setTimeout(() => {
+        const form = document.querySelector('#authMask [data-form="login"]');
+        if(form){ const inp = form.querySelector('input[name="identifier"]'); if(inp) inp.value = 'Administrator'; }
+      }, 50);
+    });
+  }
+
+  /* ---------- 管理员控制台（家长端最高权限） ---------- */
+  function adminHeaders(){
+    return (currentParent && currentParent.adminToken) ? { 'Authorization': 'Bearer ' + currentParent.adminToken } : {};
+  }
+  function adminExpired(){
+    clearSession();
+    currentParent = null;
+    currentView = 'gate';
+    toast('管理员登录已过期，请重新登录', 'err');
+    renderHome();
+  }
+  async function adminFetch(path, opts){
+    if(!currentParent || !currentParent.adminToken) throw new Error('NO_ADMIN');
+    const headers = Object.assign({}, (opts && opts.headers) || {}, adminHeaders());
+    const res = await fetch(API_BASE + path, Object.assign({}, opts || {}, { headers }));
+    if(res.status === 401){ adminExpired(); return null; }
+    return res;
+  }
+  async function adminHealthCheck(){
+    const out = $('adminHealthOut');
+    if(out) out.textContent = '检查中…';
+    try {
+      const r = await fetch(API_BASE + '/api/health');
+      const d = await r.json();
+      if(out) out.textContent = 'HTTP OK · 邮件 ' + (d.mailer ? '已配置' : '未配置') + ' · 数据库 ' + (d.database || '未知');
+    } catch(e){ if(out) out.textContent = '健康检查失败'; }
+  }
+  async function renderAdminDashboard(){
+    if(!currentParent || currentParent.role !== 'admin'){ renderHome(); return; }
+    currentView = 'admin';
+    lastReport = null;
+    navTag.textContent = 'ADMIN';
+    app.innerHTML = `
+      <div class="topbar">
+        <div class="user-chip"><span class="avatar">A</span><span>Administrator</span><span class="admin-badge">ADMIN</span></div>
+        <button class="logout-btn" id="btnLogout">退出登录</button>
+      </div>
+      <div class="admin-stat-grid" id="adminStats"><div class="empty-state">加载中…</div></div>
+      <div class="admin-toolbar">
+        <input id="adminSearch" class="admin-search" placeholder="搜索学生邮箱 / 用户名" />
+        <button class="add-student-btn" id="adminRefresh">刷新</button>
+        <button class="unbind-btn" id="adminHealth">服务器健康</button>
+      </div>
+      <div id="adminHealthOut" class="admin-health"></div>
+      <div id="adminList" class="student-list"><div class="empty-state">加载中…</div></div>
+      <div class="empty-state" style="padding-top:8px;font-size:12px;line-height:1.8;">最高权限：查看任意学生报告、代生成 AI 报告、清除 AI 缓存。</div>
+    `;
+    $('btnLogout').addEventListener('click', () => {
+      if(!confirm('退出管理员登录？')) return;
+      clearSession();
+      currentParent = null;
+      renderHome();
+    });
+    $('adminRefresh').addEventListener('click', () => loadAdminData($('adminSearch').value));
+    $('adminHealth').addEventListener('click', adminHealthCheck);
+    let timer = null;
+    $('adminSearch').addEventListener('input', e => {
+      clearTimeout(timer);
+      timer = setTimeout(() => loadAdminData(e.target.value), 250);
+    });
+    loadAdminData('');
+  }
+  async function loadAdminData(q){
+    try {
+      const [ovRes, listRes] = await Promise.all([
+        adminFetch('/api/admin/overview'),
+        adminFetch('/api/admin/students?q=' + encodeURIComponent(q || ''))
+      ]);
+      if(!ovRes || !listRes) return;
+      const ov = await ovRes.json();
+      const ls = await listRes.json();
+      if(!ov.success || !ls.success) throw new Error(ov.error || ls.error || '加载失败');
+      const o = ov.overview || {};
+      const stats = [
+        ['家长', o.parents], ['学生', o.students], ['绑定', o.bindings],
+        ['报告', o.reports], ['AI 报告', o.aiReports], ['今日 AI', o.todayAI]
+      ];
+      const statEl = $('adminStats');
+      if(statEl) statEl.innerHTML = stats.map(([k, v]) =>
+        '<div class="admin-stat"><b>' + (Number(v) || 0) + '</b><span>' + k + '</span></div>'
+      ).join('');
+      const el = $('adminList');
+      if(!el) return;
+      const rows = ls.list || [];
+      if(rows.length === 0){ el.innerHTML = '<div class="empty-state">没有匹配的学生。</div>'; return; }
+      el.innerHTML = rows.map(s => {
+        const name = s.username || s.email;
+        const init = String(name).slice(0, 1).toUpperCase();
+        const report = s.reportUpdatedAt ? ('报告更新：' + formatTime(s.reportUpdatedAt)) : '暂无报告';
+        const ai = s.hasAI ? ('AI：' + (s.aiLang || 'zh-CN')) : 'AI：未生成';
+        return '<div class="student-card">'
+          + '<div class="sc-head">'
+          +   '<div class="sc-avatar">' + escapeHTML(init) + '</div>'
+          +   '<div class="sc-info"><div class="sc-name">' + escapeHTML(name) + '</div><div class="sc-meta">' + escapeHTML(s.email) + ' · 绑定 ' + (Number(s.boundCount) || 0) + ' 位家长</div></div>'
+          +   '<span class="sc-badge ' + (s.hasAI ? '' : 'empty') + '">' + (s.hasAI ? 'AI 已生成' : '无 AI') + '</span>'
+          + '</div>'
+          + '<div class="sc-meta" style="margin-top:8px;">' + escapeHTML(report) + ' · ' + escapeHTML(ai) + '</div>'
+          + '<div class="admin-student-actions">'
+          +   (s.reportUpdatedAt ? '<button data-act="view" data-email="' + escapeHTML(s.email) + '">查看报告</button>' : '')
+          +   (s.hasAI ? '<button data-act="clear" data-email="' + escapeHTML(s.email) + '">清除 AI 缓存</button>' : '')
+          + '</div>'
+          + '</div>';
+      }).join('');
+      el.querySelectorAll('button[data-act]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const email = btn.dataset.email;
+          if(btn.dataset.act === 'view') showAdminReport(email);
+          if(btn.dataset.act === 'clear') adminClearAI(email);
+        });
+      });
+    } catch(err){
+      const el = $('adminList');
+      if(el) el.innerHTML = '<div class="empty-state" style="color:#FF8FA0;">' + escapeHTML(err.message || '加载失败') + '</div>';
+    }
+  }
+  async function adminClearAI(email){
+    if(!confirm('清除 ' + email + ' 的 AI 报告缓存？')) return;
+    try {
+      const res = await adminFetch('/api/admin/clear-ai', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentEmail: email })
+      });
+      if(!res) return;
+      const data = await res.json();
+      if(!res.ok || !data.success) throw new Error(data.error || '清除失败');
+      toast('已清除 AI 缓存', 'ok');
+      loadAdminData($('adminSearch') ? $('adminSearch').value : '');
+    } catch(err){ toast(err.message || '清除失败', 'err'); }
+  }
+  async function showAdminReport(email){
+    currentView = 'adminReport';
+    app.innerHTML = '<div class="empty-state">正在加载报告…</div>';
+    try {
+      const res = await adminFetch('/api/admin/report/' + encodeURIComponent(email));
+      if(!res) return;
+      const data = await res.json();
+      if(!res.ok || !data.success) throw new Error(data.error || '加载失败');
+      const p = data.report.payload || {};
+      const fullResult = p.fullResult || {
+        letters: p.baseCode ? p.baseCode.split('') : [],
+        suffix: { letter: p.suffixLetter || 'E', name: p.suffixName || '' },
+        dimGroupRatio: p.dimGroupRatio || {}, dimLeadInfo: p.dimLeadInfo || {},
+        suffixRatio: p.suffixRatio || {}, suffixGap: p.suffixGap || 0, dominanceScore: {}
+      };
+      const extra = Object.assign({}, p, {
+        studentEmail: data.report.studentEmail || email,
+        aiReportLang: p.aiReportLang || null,
+        aiReportSource: p.aiReportSource || 'ai',
+        adminView: true
+      });
+      renderReportView(fullResult, p.validity, p.aiReport, data.report.updatedAt, extra);
+    } catch(err){
+      app.innerHTML = '<button class="back-btn" id="btnBack">← 返回</button><div class="card" style="text-align:center;color:#FF8FA0;">加载失败：' + escapeHTML(err.message) + '</div>';
+      $('btnBack').addEventListener('click', renderAdminDashboard);
+    }
   }
 
   async function renderDashboard(){
@@ -967,7 +1175,7 @@
     return (data && data.error) || T('error');
   }
 
-  async function generateAIReport(studentEmail, btn){
+  async function generateAIReport(studentEmail, btn, adminView){
     if(isGenerating) return;
     if(!studentEmail){ toast(T('noReport'), 'err'); return; }
     const wasRegen = !!(lastReport && lastReport.aiReport && (lastReport.extra.aiReportSource || 'ai') === 'ai');
@@ -978,11 +1186,17 @@
     }
 
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      if(adminView) Object.assign(headers, adminHeaders());
+      const requestBody = adminView
+        ? { studentEmail, lang: currentLang }
+        : { parentEmail: currentParent.email, studentEmail, lang: currentLang };
       const apiRes = await fetch(API_BASE + '/api/generate-ai-report', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parentEmail: currentParent.email, studentEmail, lang: currentLang })
+        headers,
+        body: JSON.stringify(requestBody)
       });
+      if(adminView && apiRes.status === 401){ adminExpired(); return; }
       const apiData = await apiRes.json().catch(() => ({}));
       if(!apiRes.ok || !apiData.success) throw new Error(aiErrorText(apiData));
       if(apiData.cached) toast(T('cached'), 'info');
@@ -1012,6 +1226,7 @@
 
   function renderReportView(res, validity, aiReportText, updatedAt, extraData){
     const lang = currentLang;
+    const adminView = !!(extraData && extraData.adminView);
     const pack = PT[lang] || PT['zh-CN'];
     const baseCode = res.letters.join('');
     const typeName = (lang === 'zh-CN' || lang === 'zh-TW') ? (Q.TYPE_NAMES[baseCode] || '') : '';
@@ -1080,16 +1295,17 @@
       <div style="text-align:center;margin-top:24px;"><button class="btn" id="btnBackBottom">${escapeHTML(pack.back)}</button></div>
     `;
 
-    $('btnBack').addEventListener('click', renderDashboard);
-    $('btnBackBottom').addEventListener('click', renderDashboard);
+    const goBack = adminView ? renderAdminDashboard : renderDashboard;
+    $('btnBack').addEventListener('click', goBack);
+    $('btnBackBottom').addEventListener('click', goBack);
     const genBtn = $('btnGenAI');
-    if(genBtn) genBtn.addEventListener('click', () => generateAIReport(genBtn.dataset.student, genBtn));
+    if(genBtn) genBtn.addEventListener('click', () => generateAIReport(genBtn.dataset.student, genBtn, adminView));
   }
 
   function init(){
     initLangSelect();
     const session = loadSession();
-    if(session) currentParent = { email: session.email, phone: session.phone, username: session.username };
+    if(session) currentParent = { email: session.email, phone: session.phone, username: session.username, role: session.role || 'parent', adminToken: session.adminToken || null };
     renderHome();
   }
 
