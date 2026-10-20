@@ -239,6 +239,9 @@ async function initDB() {
       "userEmail" VARCHAR(255),
       page VARCHAR(50),
       app VARCHAR(20) NOT NULL DEFAULT 'student',
+      ip VARCHAR(64),
+      "userAgent" TEXT,
+      referer TEXT,
       reply TEXT,
       "replySubject" VARCHAR(255),
       "replyAt" BIGINT,
@@ -247,6 +250,9 @@ async function initDB() {
       "createdAt" BIGINT NOT NULL
     );`);
     await pool.query(`ALTER TABLE feedback ADD COLUMN IF NOT EXISTS app VARCHAR(20) NOT NULL DEFAULT 'student';`);
+    await pool.query(`ALTER TABLE feedback ADD COLUMN IF NOT EXISTS ip VARCHAR(64);`);
+    await pool.query(`ALTER TABLE feedback ADD COLUMN IF NOT EXISTS "userAgent" TEXT;`);
+    await pool.query(`ALTER TABLE feedback ADD COLUMN IF NOT EXISTS referer TEXT;`);
     await pool.query(`ALTER TABLE feedback ADD COLUMN IF NOT EXISTS reply TEXT;`);
     await pool.query(`ALTER TABLE feedback ADD COLUMN IF NOT EXISTS "replySubject" VARCHAR(255);`);
     await pool.query(`ALTER TABLE feedback ADD COLUMN IF NOT EXISTS "replyAt" BIGINT;`);
@@ -1236,19 +1242,21 @@ app.post('/api/feedback', async (req, res) => {
   }
   const name = String(body.name || '').trim().slice(0, 50);
   const email = String(body.email || '').trim().slice(0, 255);
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return res.status(400).json({ error: '邮箱格式不正确', code: 'BAD_EMAIL' });
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: '请填写正确的联系邮箱', code: 'BAD_EMAIL' });
   }
   const role = ['student', 'parent', 'admin', 'guest'].includes(body.role) ? body.role : 'parent';
   const userEmail = String(body.userEmail || '').trim().toLowerCase().slice(0, 255);
   const page = String(body.page || 'parent-contact').trim().slice(0, 50);
+  const userAgent = String(req.headers['user-agent'] || '').slice(0, 500);
+  const referer = String(req.headers.referer || req.headers.origin || '').slice(0, 500);
 
   try {
     const r = await pool.query(
-      `INSERT INTO feedback (name, email, role, type, content, "userEmail", page, app, "createdAt")
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'parent', $8)
+      `INSERT INTO feedback (name, email, role, type, content, "userEmail", page, app, ip, "userAgent", referer, "createdAt")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'parent', $8, $9, $10, $11)
        RETURNING id, "createdAt"`,
-      [name, email, role, type, content, userEmail, page, now]
+      [name, email, role, type, content, userEmail, page, ip, userAgent, referer, now]
     );
     feedbackCooldowns.set(ip, now);
     if (feedbackCooldowns.size > 2000) {
@@ -1268,7 +1276,7 @@ app.get('/api/admin/feedback', requireAdmin, async (req, res) => {
   try {
     const r = await pool.query(`
       SELECT id, name, email, role, type, content, "userEmail", page, "createdAt",
-             app, reply, "replySubject", "replyAt", "replyBy", "replyTo"
+             app, ip, "userAgent", referer, reply, "replySubject", "replyAt", "replyBy", "replyTo"
       FROM feedback
       WHERE app = 'parent'
       ORDER BY "createdAt" DESC

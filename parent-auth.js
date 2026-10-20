@@ -1125,12 +1125,12 @@
       <div style="width:100%;max-width:540px;max-height:90vh;overflow-y:auto;padding:26px;border-radius:18px;border:1px solid rgba(255,255,255,.1);background:#0B0D1C;">
         <div style="font-size:11px;letter-spacing:.22em;color:var(--muted);text-transform:uppercase;margin-bottom:8px;">Feedback · 投诉与反馈</div>
         <h2 style="font-size:22px;color:#fff;margin-bottom:8px;">写给 QBTI 团队</h2>
-        <p style="font-size:12.5px;color:var(--muted);line-height:1.7;margin-bottom:16px;">遇到问题、想投诉，或对问卷和产品有建议，都可以写在这里。管理员会通过邮件回复你。<br>联系邮箱：1182332400@qq.com</p>
+        <p style="font-size:12.5px;color:var(--muted);line-height:1.7;margin-bottom:16px;">遇到问题、想投诉，或对问卷和产品有建议，都可以写在这里。管理员会通过邮件回复你。<br><b style="color:#DDE2FF;">我们将通过邮件的方式联系您。</b><br>联系邮箱：1182332400@qq.com</p>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
           <div><label style="font-size:11px;color:var(--muted);">类型</label><select id="pfType" style="width:100%;padding:10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:#11142A;color:#fff;"><option value="suggestion">建议</option><option value="complaint">投诉</option><option value="other">其他</option></select></div>
           <div><label style="font-size:11px;color:var(--muted);">称呼（选填）</label><input id="pfName" maxlength="50" value="${escapeHTML(u ? (u.username || '') : '')}" style="width:100%;padding:10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#fff;" /></div>
         </div>
-        <div style="margin-bottom:10px;"><label style="font-size:11px;color:var(--muted);">联系邮箱（选填）</label><input id="pfEmail" type="email" maxlength="255" value="${escapeHTML(u ? (u.email || '') : '')}" style="width:100%;padding:10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#fff;" /></div>
+        <div style="margin-bottom:10px;"><label style="font-size:11px;color:var(--muted);">联系邮箱（必填）</label><input id="pfEmail" type="email" maxlength="255" required value="${escapeHTML(u ? (u.email || '') : '')}" style="width:100%;padding:10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#fff;" /></div>
         <div style="margin-bottom:10px;"><label style="font-size:11px;color:var(--muted);">反馈内容</label><textarea id="pfContent" maxlength="2000" placeholder="请描述问题、投诉内容或建议（5-2000 字）" style="width:100%;min-height:120px;padding:10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#fff;line-height:1.7;resize:vertical;"></textarea></div>
         <div id="pfStatus" style="min-height:18px;font-size:12px;color:#FF8FA0;margin-bottom:8px;"></div>
         <div style="display:flex;gap:10px;">
@@ -1146,7 +1146,12 @@
     document.getElementById('pfSubmit').addEventListener('click', async () => {
       const status = document.getElementById('pfStatus');
       const content = document.getElementById('pfContent').value.trim();
+      const email = document.getElementById('pfEmail').value.trim();
       if(content.length < 5){ status.textContent = '反馈内容至少 5 个字。'; return; }
+      if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+        status.textContent = '请填写正确的联系邮箱，我们将通过邮件的方式联系您。';
+        return;
+      }
       const btn = document.getElementById('pfSubmit');
       btn.disabled = true; btn.textContent = '提交中…'; status.textContent = '';
       try {
@@ -1157,7 +1162,7 @@
             type: document.getElementById('pfType').value,
             content: content,
             name: document.getElementById('pfName').value.trim(),
-            email: document.getElementById('pfEmail').value.trim(),
+            email: email,
             role: u ? (u.role === 'admin' ? 'admin' : 'parent') : 'guest',
             userEmail: u && u.email ? u.email : '',
             page: 'parent-contact'
@@ -1195,7 +1200,20 @@
         const who = f.name || f.userEmail || f.email || '匿名';
         const contact = [f.email, f.userEmail].filter(Boolean).join(' · ');
         const reply = f.reply ? '<div class="feedback-admin-reply"><b>已回复 · ' + formatTime(f.replyAt) + '</b><br>' + escapeHTML(String(f.reply)).replace(/\n/g, '<br>') + '</div>' : '';
-        return '<div class="admin-record"><div class="admin-record-main"><b>' + escapeHTML(who) + '</b><span>' + escapeHTML(contact || '未留邮箱') + ' · ' + formatTime(f.createdAt) + '</span><div style="margin-top:6px;font-size:12px;color:#DDE2FF;line-height:1.6;">' + escapeHTML(String(f.content || '')).replace(/\n/g, '<br>') + '</div>' + reply + '</div><div class="admin-student-actions"><button data-fb-reply="' + f.id + '">邮件回复</button></div></div>';
+        const logText = [
+          '反馈 ID: ' + f.id,
+          '应用: ' + (f.app || '—'),
+          '角色: ' + (f.role || '—'),
+          '登录邮箱: ' + (f.userEmail || '—'),
+          '联系邮箱: ' + (f.email || '—'),
+          '页面: ' + (f.page || '—'),
+          'IP: ' + (f.ip || '—'),
+          'User-Agent: ' + (f.userAgent || '—'),
+          'Referer: ' + (f.referer || '—'),
+          '提交时间: ' + formatTime(f.createdAt)
+        ].join('\n');
+        const log = '<details class="feedback-log"><summary>后台日志</summary><pre>' + escapeHTML(logText) + '</pre></details>';
+        return '<div class="admin-record"><div class="admin-record-main"><b>' + escapeHTML(who) + '</b><span>' + escapeHTML(contact || '未留邮箱') + ' · ' + formatTime(f.createdAt) + '</span><div style="margin-top:6px;font-size:12px;color:#DDE2FF;line-height:1.6;">' + escapeHTML(String(f.content || '')).replace(/\n/g, '<br>') + '</div>' + reply + log + '</div><div class="admin-student-actions"><button data-fb-reply="' + f.id + '">邮件回复</button></div></div>';
       }).join('');
       list.querySelectorAll('[data-fb-reply]').forEach(btn => {
         btn.addEventListener('click', () => {
