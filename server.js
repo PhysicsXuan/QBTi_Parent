@@ -413,6 +413,40 @@ app.post('/api/parent/reset-password', async (req, res) => {
   }
 });
 
+// 家长注销账户（删除注册信息/绑定关系/AI 用量）
+app.post('/api/parent/delete-account', async (req, res) => {
+  const { email, password } = req.body || {};
+  const emailLower = String(email || '').trim().toLowerCase();
+  if (!emailLower || !password) return res.status(400).json({ error: '参数不完整' });
+
+  try {
+    const r = await pool.query('SELECT * FROM parents WHERE email = $1', [emailLower]);
+    const parent = r.rows[0];
+    if (!parent) return res.status(404).json({ error: '账号不存在' });
+    if (hashPassword(password, parent.salt) !== parent.passwordHash) {
+      return res.status(401).json({ error: '密码不正确' });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM bindings WHERE "parentEmail" = $1', [emailLower]);
+      await client.query('DELETE FROM ai_usage WHERE "parentEmail" = $1', [emailLower]);
+      await client.query('DELETE FROM parents WHERE email = $1', [emailLower]);
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[家长注销账户] 失败:', err.message);
+    res.status(500).json({ error: '服务器数据库异常' });
+  }
+});
+
 /* ============================================================
    API: 绑定与查看报告
    ============================================================ */

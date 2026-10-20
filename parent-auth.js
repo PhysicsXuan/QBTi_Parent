@@ -833,6 +833,11 @@
         </div>
         <div class="admin-policy-note" id="adminPolicyNote">学生端 Administrator 的登录与权限由此处控制；停用后学生端管理员无法登录，已登录会话会在下一次校验时失效。</div>
       </div>
+      <div class="admin-policy">
+        <div class="admin-policy-head"><span>学生端管理员 · 最新问卷记录</span><span class="admin-policy-status" id="adminStudentReportStatus">加载中…</span></div>
+        <div class="admin-policy-note" id="adminStudentReportInfo">服务器只保留最近一次同步记录；家长端管理员可直接查看或代生成 AI 报告。</div>
+        <div class="admin-student-actions" id="adminStudentReportActions"></div>
+      </div>
       <div class="admin-toolbar">
         <input id="adminSearch" class="admin-search" placeholder="搜索学生邮箱 / 用户名" />
         <button class="add-student-btn" id="adminRefresh">刷新</button>
@@ -859,6 +864,7 @@
     });
     loadAdminData('');
     loadStudentAdminPolicy();
+    loadStudentAdminReport();
   }
   async function loadStudentAdminPolicy(){
     const status = $('adminPolicyStatus');
@@ -911,6 +917,59 @@
       toast('学生端管理员密码已重置', 'ok');
       loadStudentAdminPolicy();
     } catch(err){ toast(err.message || '重置失败', 'err'); }
+  }
+  async function loadStudentAdminReport(){
+    const status = $('adminStudentReportStatus');
+    const info = $('adminStudentReportInfo');
+    const actions = $('adminStudentReportActions');
+    try {
+      const res = await adminFetch('/api/admin/report/administrator%40qbti.local');
+      if(!res) return;
+      if(res.status === 404){
+        if(status){ status.textContent = '暂无记录'; status.className = 'admin-policy-status off'; }
+        if(info) info.textContent = '学生端管理员尚未同步过问卷记录。';
+        if(actions) actions.innerHTML = '';
+        return;
+      }
+      const data = await res.json();
+      if(!res.ok || !data.success) throw new Error(data.error || '读取失败');
+      const p = data.report.payload || {};
+      const code = p.code || (p.baseCode ? p.baseCode + '-' + (p.suffixLetter || '') : '—');
+      const hasAI = !!p.aiReport;
+      if(status){
+        status.textContent = hasAI ? 'AI 已生成' : '已同步';
+        status.className = 'admin-policy-status ' + (hasAI ? 'on' : '');
+      }
+      if(info) info.textContent = '类型 ' + code + ' · 更新时间 ' + formatTime(data.report.updatedAt) + ' · AI ' + (hasAI ? (p.aiReportLang || 'zh-CN') : '未生成');
+      if(actions){
+        actions.innerHTML = '<button id="adminViewStudentReport">查看记录</button><button id="adminGenStudentReport">代生成 AI 报告</button>';
+        $('adminViewStudentReport').addEventListener('click', () => showAdminReport('administrator@qbti.local'));
+        $('adminGenStudentReport').addEventListener('click', () => adminGenerateFor('administrator@qbti.local', $('adminGenStudentReport')));
+      }
+    } catch(err){
+      if(status){ status.textContent = '读取失败'; status.className = 'admin-policy-status off'; }
+      if(info) info.textContent = err.message || '读取失败';
+      if(actions) actions.innerHTML = '';
+    }
+  }
+  async function adminGenerateFor(email, btn){
+    if(btn){ btn.disabled = true; btn.textContent = '生成中…'; }
+    try {
+      const res = await fetch(API_BASE + '/api/generate-ai-report', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/json' }, adminHeaders()),
+        body: JSON.stringify({ studentEmail: email, lang: currentLang })
+      });
+      if(res.status === 401){ adminExpired(); return; }
+      const data = await res.json().catch(() => ({}));
+      if(!res.ok || !data.success) throw new Error(aiErrorText(data));
+      toast(data.cached ? '已读取现有 AI 报告' : 'AI 报告已生成', 'ok');
+      loadStudentAdminReport();
+      if($('adminList')) loadAdminData($('adminSearch') ? $('adminSearch').value : '');
+    } catch(err){
+      toast(err.message || '生成失败', 'err');
+      if(btn){ btn.disabled = false; btn.textContent = '代生成 AI 报告'; }
+    }
   }
   async function loadAdminData(q){
     try {
@@ -1016,7 +1075,10 @@
           <span class="avatar">${escapeHTML((currentParent.username||'?').slice(0,1).toUpperCase())}</span>
           <span>${escapeHTML(currentParent.username)}</span>
         </div>
-        <button class="logout-btn" id="btnLogout">退出登录</button>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="unbind-btn" id="btnAccountInfo">账户信息</button>
+          <button class="logout-btn" id="btnLogout">退出登录</button>
+        </div>
       </div>
       <div class="topbar" style="margin-bottom:24px;">
         <div style="font-size:13px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;">已绑定的孩子</div>
@@ -1032,10 +1094,93 @@
       clearSession(); 
       renderHome(); 
     });
+    $('btnAccountInfo').addEventListener('click', openAccountInfo);
     
     $('btnAddStudent').addEventListener('click', openBindDialog);
 
     loadBoundStudents();
+  }
+
+  function openAccountInfo(){
+    if(!currentParent || currentParent.role === 'admin') return;
+    const old = document.getElementById('accountMask');
+    if(old) old.remove();
+    const mask = document.createElement('div');
+    mask.className = 'auth-mask show';
+    mask.id = 'accountMask';
+    mask.innerHTML = `
+      <div class="auth-modal">
+        <button class="auth-close" type="button" aria-label="关闭">×</button>
+        <h2 class="auth-title">账户信息</h2>
+        <p class="auth-subtitle">管理你的家长账户</p>
+        <div class="account-info">
+          <div class="account-row"><span>邮箱</span><b>${escapeHTML(currentParent.email)}</b></div>
+          <div class="account-row"><span>用户名</span><b>${escapeHTML(currentParent.username || '—')}</b></div>
+          <div class="account-row"><span>手机号</span><b>${escapeHTML(currentParent.phone || '—')}</b></div>
+        </div>
+        <button type="button" class="account-delete-btn" id="accountDeleteBtn">注销账户</button>
+      </div>`;
+    document.body.appendChild(mask);
+    const close = () => mask.remove();
+    mask.querySelector('.auth-close').addEventListener('click', close);
+    mask.addEventListener('click', e => { if(e.target === mask) close(); });
+    mask.querySelector('#accountDeleteBtn').addEventListener('click', () => showParentDeleteForm(mask));
+  }
+
+  function showParentDeleteForm(mask){
+    const email = currentParent.email;
+    const modal = mask.querySelector('.auth-modal');
+    modal.innerHTML = `
+      <button class="auth-close" type="button" aria-label="关闭">×</button>
+      <h2 class="auth-title">注销账户</h2>
+      <p class="auth-subtitle">将永久删除该家长账户的注册信息、绑定关系与 AI 用量；该邮箱之后可以重新注册。</p>
+      <div class="auth-field"><label>输入账户邮箱确认</label><input id="pDelEmail" type="text" placeholder="${escapeHTML(email)}" autocomplete="off" /></div>
+      <div class="auth-field"><label>密码</label><input id="pDelPwd" type="password" placeholder="输入当前密码" autocomplete="current-password" /></div>
+      <label class="account-check"><input type="checkbox" id="pDelCheck" /> 我已知晓：注销后不可恢复</label>
+      <button type="button" class="account-delete-btn" id="pDelConfirm" disabled>永久注销</button>
+      <div class="account-err" id="pDelErr"></div>`;
+    const close = () => mask.remove();
+    modal.querySelector('.auth-close').addEventListener('click', close);
+    const check = modal.querySelector('#pDelCheck');
+    const btn = modal.querySelector('#pDelConfirm');
+    const err = modal.querySelector('#pDelErr');
+    check.addEventListener('change', () => { btn.disabled = !check.checked; });
+    btn.addEventListener('click', async () => {
+      const typed = String(modal.querySelector('#pDelEmail').value || '').trim();
+      const pwd = String(modal.querySelector('#pDelPwd').value || '');
+      err.textContent = '';
+      if(typed.toLowerCase() !== email.toLowerCase()){ err.textContent = '邮箱与当前账户不一致'; return; }
+      if(!pwd){ err.textContent = '请输入密码'; return; }
+      if(!confirm('最后一次确认：永久注销该家长账户？此操作不可恢复。')) return;
+      btn.disabled = true;
+      try {
+        const res = await fetch(API_BASE + '/api/parent/delete-account', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password: pwd })
+        });
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok || !data.success){
+          err.textContent = data.error || '注销失败';
+          btn.disabled = false;
+          return;
+        }
+        mask.remove();
+        try { localStorage.removeItem('qparent_report_lang_v1'); } catch(e){}
+        currentLang = 'zh-CN';
+        const sel = document.getElementById('reportLang');
+        if(sel) sel.value = 'zh-CN';
+        clearSession();
+        currentParent = null;
+        lastReport = null;
+        currentView = 'gate';
+        toast('账户已注销', 'ok');
+        renderHome();
+      } catch(e){
+        err.textContent = '无法连接服务器';
+        btn.disabled = false;
+      }
+    });
   }
 
   async function loadBoundStudents(){
