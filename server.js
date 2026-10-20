@@ -167,9 +167,24 @@ async function initDB() {
       count INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY ("parentEmail", day)
     );`);
-    console.log('✅ ai_usage 表检查完成');
+    await pool.query(`CREATE TABLE IF NOT EXISTS admin_policy (
+      id VARCHAR(32) PRIMARY KEY,
+      enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      salt VARCHAR(255) NOT NULL,
+      "passwordHash" VARCHAR(255) NOT NULL,
+      "updatedAt" BIGINT NOT NULL,
+      "updatedBy" VARCHAR(255)
+    );`);
+    const salt = genSalt();
+    await pool.query(
+      `INSERT INTO admin_policy (id, enabled, salt, "passwordHash", "updatedAt", "updatedBy")
+       VALUES ('student_admin', TRUE, $1, $2, $3, 'system')
+       ON CONFLICT (id) DO NOTHING`,
+      [salt, hashAdminPolicyPassword('admin123456', salt), Date.now()]
+    );
+    console.log('✅ ai_usage / admin_policy 表检查完成');
   } catch (err) {
-    console.error('❌ ai_usage 表初始化失败:', err.message);
+    console.error('❌ 数据库表初始化失败:', err.message);
   }
 }
 
@@ -179,6 +194,9 @@ function hashPassword(pw, salt) {
 }
 function genSalt() {
   return crypto.randomBytes(16).toString('hex');
+}
+function hashAdminPolicyPassword(pw, salt) {
+  return 'scrypt$' + crypto.scryptSync(String(pw), String(salt), 64).toString('hex');
 }
 
 /* ============================================================
@@ -629,6 +647,64 @@ app.post('/api/admin/clear-ai', requireAdmin, async (req, res) => {
 });
 
 /* ============================================================
+   管理员：学生端管理员账户策略
+   学生端 Administrator 的启用状态与密码由家长端管理员控制
+   ============================================================ */
+app.get('/api/admin/student-admin', requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query(
+      'SELECT enabled, "updatedAt", "updatedBy" FROM admin_policy WHERE id = $1',
+      ['student_admin']
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: '学生端管理员策略不存在' });
+    const row = r.rows[0];
+    res.json({
+      success: true,
+      policy: {
+        enabled: !!row.enabled,
+        updatedAt: Number(row.updatedAt) || null,
+        updatedBy: row.updatedBy || ''
+      }
+    });
+  } catch (err) {
+    console.error('[学生端管理员策略] 读取失败:', err.message);
+    res.status(500).json({ error: '服务器数据库异常' });
+  }
+});
+
+app.post('/api/admin/student-admin', requireAdmin, async (req, res) => {
+  const { enabled, password } = req.body || {};
+  if (enabled == null && !password) {
+    return res.status(400).json({ error: '没有需要更新的内容' });
+  }
+  if (password && String(password).length < 6) {
+    return res.status(400).json({ error: '学生端管理员密码至少 6 位' });
+  }
+  try {
+    const cur = await pool.query('SELECT * FROM admin_policy WHERE id = $1', ['student_admin']);
+    if (cur.rows.length === 0) return res.status(404).json({ error: '学生端管理员策略不存在' });
+    const row = cur.rows[0];
+    const nextEnabled = (enabled == null) ? !!row.enabled : !!enabled;
+    let salt = row.salt;
+    let passwordHash = row.passwordHash;
+    if (password) {
+      salt = genSalt();
+      passwordHash = hashAdminPolicyPassword(password, salt);
+    }
+    await pool.query(
+      `UPDATE admin_policy
+       SET enabled = $1, salt = $2, "passwordHash" = $3, "updatedAt" = $4, "updatedBy" = $5
+       WHERE id = $6`,
+      [nextEnabled, salt, passwordHash, Date.now(), 'parent-admin', 'student_admin']
+    );
+    res.json({ success: true, policy: { enabled: nextEnabled, updatedAt: Date.now(), updatedBy: 'parent-admin' } });
+  } catch (err) {
+    console.error('[学生端管理员策略] 更新失败:', err.message);
+    res.status(500).json({ error: '服务器数据库异常' });
+  }
+});
+
+/* ============================================================
    API: AI 代理生成
    屏障：绑定校验 + 同语言缓存 + 并发锁 + 60 秒冷却 + 每日上限
    客户端只传 parentEmail / studentEmail / lang，不能传 prompt
@@ -749,14 +825,15 @@ app.post('/api/generate-ai-report', async (req, res) => {
   }
 });
 
-// 启动服务
-app.listen(PORT, async () => {
-  console.log('===========================================');
-  console.log('  QBTI 家长端独立服务器已启动');
-  console.log('  端口: ' + PORT);
-  console.log('  数据库: ' + (DATABASE_URL ? '✅ 已配置' : '❌ 未配置'));
-  console.log('  邮件: ' + (AGENTMAIL_API_KEY ? '✅ 已启用' : '⚠️ 未配置'));
-  console.log('  DeepSeek: ' + (DEEPSEEK_API_KEY ? '✅ 已启用' : '⚠️ 未配置'));
-  console.log('===========================================');
-  await initDB();
+// 启动服务：先补齐表结构/管理员策略，再开始接收请求
+initDB().finally(() => {
+  app.listen(PORT, () => {
+    console.log('===========================================');
+    console.log('  QBTI 家长端独立服务器已启动');
+    console.log('  端口: ' + PORT);
+    console.log('  数据库: ' + (DATABASE_URL ? '✅ 已配置' : '❌ 未配置'));
+    console.log('  邮件: ' + (AGENTMAIL_API_KEY ? '✅ 已启用' : '⚠️ 未配置'));
+    console.log('  DeepSeek: ' + (DEEPSEEK_API_KEY ? '✅ 已启用' : '⚠️ 未配置'));
+    console.log('===========================================');
+  });
 });

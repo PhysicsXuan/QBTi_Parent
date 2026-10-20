@@ -307,11 +307,11 @@
             <button type="button" data-tab="register">注册</button>
           </div>
           <h2 class="auth-title">家长登录</h2>
-          <p class="auth-subtitle">用注册邮箱登录，查看孩子的量子态报告；管理员可用 Administrator 登录</p>
+          <p class="auth-subtitle">用注册邮箱登录，查看孩子的量子态报告</p>
           <form data-form="login" autocomplete="on">
             <div class="auth-field" data-name="identifier">
-              <label>邮箱 / 管理员账号</label>
-              <input name="identifier" type="text" placeholder="your@email.com / Administrator" autocomplete="username" />
+              <label>邮箱</label>
+              <input name="identifier" type="text" placeholder="your@email.com" autocomplete="username" />
               <div class="auth-err"></div>
             </div>
             <div class="auth-field" data-name="password">
@@ -691,7 +691,7 @@
     const btn = form.querySelector('.auth-submit');
     clearFormErrors(form);
 
-    if(!data.identifier){ setFieldError(form, 'identifier', '请输入邮箱或管理员账号'); return; }
+    if(!data.identifier){ setFieldError(form, 'identifier', '请输入邮箱'); return; }
     if(!data.password){ setFieldError(form, 'password', '请输入密码'); return; }
 
     const idLower = String(data.identifier || '').trim().toLowerCase();
@@ -777,18 +777,10 @@
         <p>登录家长账户后，即可查看孩子的量子态报告。</p>
         <button id="btnShowLogin" style="max-width:200px;margin:0 auto 12px;display:block;">登录家长账户</button>
         <button id="btnShowRegister" style="max-width:200px;margin:0 auto;display:block;background:transparent;border:1px solid rgba(255,255,255,.14);color:#fff;">注册家长账户</button>
-        <div class="admin-entry"><a id="btnAdminEntry">管理员登录（Administrator）</a></div>
       </div>
     `;
     $('btnShowLogin').addEventListener('click', () => openAuth('login'));
     $('btnShowRegister').addEventListener('click', () => openAuth('register'));
-    $('btnAdminEntry').addEventListener('click', () => {
-      openAuth('login');
-      setTimeout(() => {
-        const form = document.querySelector('#authMask [data-form="login"]');
-        if(form){ const inp = form.querySelector('input[name="identifier"]'); if(inp) inp.value = 'Administrator'; }
-      }, 50);
-    });
   }
 
   /* ---------- 管理员控制台（家长端最高权限） ---------- */
@@ -829,6 +821,18 @@
         <button class="logout-btn" id="btnLogout">退出登录</button>
       </div>
       <div class="admin-stat-grid" id="adminStats"><div class="empty-state">加载中…</div></div>
+      <div class="admin-policy">
+        <div class="admin-policy-head"><span>学生端管理员 · Administrator</span><span class="admin-policy-status" id="adminPolicyStatus">加载中…</span></div>
+        <div class="admin-policy-row">
+          <label><input type="checkbox" id="adminPolicyEnabled" /> 启用学生端管理员</label>
+          <button class="unbind-btn" id="adminPolicySave">保存状态</button>
+        </div>
+        <div class="admin-policy-row">
+          <input id="adminPolicyPwd" type="password" class="admin-search" placeholder="重置学生端管理员密码（至少 6 位）" />
+          <button class="unbind-btn" id="adminPolicyPwdBtn">重置密码</button>
+        </div>
+        <div class="admin-policy-note" id="adminPolicyNote">学生端 Administrator 的登录与权限由此处控制；停用后学生端管理员无法登录，已登录会话会在下一次校验时失效。</div>
+      </div>
       <div class="admin-toolbar">
         <input id="adminSearch" class="admin-search" placeholder="搜索学生邮箱 / 用户名" />
         <button class="add-student-btn" id="adminRefresh">刷新</button>
@@ -846,12 +850,67 @@
     });
     $('adminRefresh').addEventListener('click', () => loadAdminData($('adminSearch').value));
     $('adminHealth').addEventListener('click', adminHealthCheck);
+    $('adminPolicySave').addEventListener('click', saveStudentAdminPolicy);
+    $('adminPolicyPwdBtn').addEventListener('click', resetStudentAdminPassword);
     let timer = null;
     $('adminSearch').addEventListener('input', e => {
       clearTimeout(timer);
       timer = setTimeout(() => loadAdminData(e.target.value), 250);
     });
     loadAdminData('');
+    loadStudentAdminPolicy();
+  }
+  async function loadStudentAdminPolicy(){
+    const status = $('adminPolicyStatus');
+    const note = $('adminPolicyNote');
+    try {
+      const res = await adminFetch('/api/admin/student-admin');
+      if(!res) return;
+      const data = await res.json();
+      if(!res.ok || !data.success) throw new Error(data.error || '读取失败');
+      const p = data.policy || {};
+      if($('adminPolicyEnabled')) $('adminPolicyEnabled').checked = !!p.enabled;
+      if(status){
+        status.textContent = p.enabled ? '已启用' : '已停用';
+        status.className = 'admin-policy-status ' + (p.enabled ? 'on' : 'off');
+      }
+      if(note) note.textContent = '最近更新：' + (p.updatedAt ? formatTime(p.updatedAt) : '—') + ' · 操作人：' + (p.updatedBy || '—');
+    } catch(err){
+      if(status) status.textContent = '读取失败';
+      if(note) note.textContent = err.message || '读取失败';
+    }
+  }
+  async function saveStudentAdminPolicy(){
+    const enabled = !!($('adminPolicyEnabled') && $('adminPolicyEnabled').checked);
+    try {
+      const res = await adminFetch('/api/admin/student-admin', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+      });
+      if(!res) return;
+      const data = await res.json();
+      if(!res.ok || !data.success) throw new Error(data.error || '保存失败');
+      toast(enabled ? '学生端管理员已启用' : '学生端管理员已停用', 'ok');
+      loadStudentAdminPolicy();
+    } catch(err){ toast(err.message || '保存失败', 'err'); }
+  }
+  async function resetStudentAdminPassword(){
+    const inp = $('adminPolicyPwd');
+    const pwd = inp ? inp.value.trim() : '';
+    if(pwd.length < 6){ toast('密码至少 6 位', 'err'); return; }
+    if(!confirm('重置学生端管理员密码？已登录的学生端管理员会被强制下线。')) return;
+    try {
+      const res = await adminFetch('/api/admin/student-admin', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pwd })
+      });
+      if(!res) return;
+      const data = await res.json();
+      if(!res.ok || !data.success) throw new Error(data.error || '重置失败');
+      if(inp) inp.value = '';
+      toast('学生端管理员密码已重置', 'ok');
+      loadStudentAdminPolicy();
+    } catch(err){ toast(err.message || '重置失败', 'err'); }
   }
   async function loadAdminData(q){
     try {
