@@ -776,11 +776,13 @@
         <h1>QBTI 家长端</h1>
         <p>登录家长账户后，即可查看孩子的量子态报告。</p>
         <button id="btnShowLogin" style="max-width:200px;margin:0 auto 12px;display:block;">登录家长账户</button>
-        <button id="btnShowRegister" style="max-width:200px;margin:0 auto;display:block;background:transparent;border:1px solid rgba(255,255,255,.14);color:#fff;">注册家长账户</button>
+        <button id="btnShowRegister" style="max-width:200px;margin:0 auto 12px;display:block;background:transparent;border:1px solid rgba(255,255,255,.14);color:#fff;">注册家长账户</button>
+        <button id="btnGateFeedback" style="max-width:240px;margin:0 auto;display:block;background:transparent;border:0;color:var(--muted);font-size:12px;">投诉与反馈 · 1182332400@qq.com</button>
       </div>
     `;
     $('btnShowLogin').addEventListener('click', () => openAuth('login'));
     $('btnShowRegister').addEventListener('click', () => openAuth('register'));
+    $('btnGateFeedback').addEventListener('click', openParentFeedback);
   }
 
   /* ---------- 管理员控制台（家长端最高权限） ---------- */
@@ -838,6 +840,11 @@
         <div class="admin-policy-note" id="adminStudentReportInfo">学生端管理员每次完成问卷都会同步一条记录；家长端管理员可逐条查看或代生成 AI 报告。</div>
         <div class="admin-record-list" id="adminStudentRecordList"><div class="empty-state">加载中…</div></div>
       </div>
+      <div class="admin-policy">
+        <div class="admin-policy-head"><span>投诉与反馈</span><span class="admin-policy-status" id="adminFeedbackStatus">加载中…</span></div>
+        <div class="admin-policy-note">家长端用户提交的投诉与建议；可直接通过 QBTI 虚拟邮箱回复。</div>
+        <div class="admin-record-list" id="adminFeedbackList"><div class="empty-state">加载中…</div></div>
+      </div>
       <div class="admin-toolbar">
         <input id="adminSearch" class="admin-search" placeholder="搜索学生邮箱 / 用户名" />
         <button class="add-student-btn" id="adminRefresh">刷新</button>
@@ -865,6 +872,7 @@
     loadAdminData('');
     loadStudentAdminPolicy();
     loadStudentAdminRecords();
+    loadAdminFeedback();
   }
   async function loadStudentAdminPolicy(){
     const status = $('adminPolicyStatus');
@@ -1106,6 +1114,150 @@
     }
   }
 
+  function openParentFeedback(){
+    const old = document.getElementById('parentFeedbackMask');
+    if(old) old.remove();
+    const u = currentParent;
+    const mask = document.createElement('div');
+    mask.id = 'parentFeedbackMask';
+    mask.style.cssText = 'position:fixed;inset:0;background:rgba(3,4,12,.86);backdrop-filter:blur(10px);z-index:400;display:grid;place-items:center;padding:20px;';
+    mask.innerHTML = `
+      <div style="width:100%;max-width:540px;max-height:90vh;overflow-y:auto;padding:26px;border-radius:18px;border:1px solid rgba(255,255,255,.1);background:#0B0D1C;">
+        <div style="font-size:11px;letter-spacing:.22em;color:var(--muted);text-transform:uppercase;margin-bottom:8px;">Feedback · 投诉与反馈</div>
+        <h2 style="font-size:22px;color:#fff;margin-bottom:8px;">写给 QBTI 团队</h2>
+        <p style="font-size:12.5px;color:var(--muted);line-height:1.7;margin-bottom:16px;">遇到问题、想投诉，或对问卷和产品有建议，都可以写在这里。管理员会通过邮件回复你。<br>联系邮箱：1182332400@qq.com</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+          <div><label style="font-size:11px;color:var(--muted);">类型</label><select id="pfType" style="width:100%;padding:10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:#11142A;color:#fff;"><option value="suggestion">建议</option><option value="complaint">投诉</option><option value="other">其他</option></select></div>
+          <div><label style="font-size:11px;color:var(--muted);">称呼（选填）</label><input id="pfName" maxlength="50" value="${escapeHTML(u ? (u.username || '') : '')}" style="width:100%;padding:10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#fff;" /></div>
+        </div>
+        <div style="margin-bottom:10px;"><label style="font-size:11px;color:var(--muted);">联系邮箱（选填）</label><input id="pfEmail" type="email" maxlength="255" value="${escapeHTML(u ? (u.email || '') : '')}" style="width:100%;padding:10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#fff;" /></div>
+        <div style="margin-bottom:10px;"><label style="font-size:11px;color:var(--muted);">反馈内容</label><textarea id="pfContent" maxlength="2000" placeholder="请描述问题、投诉内容或建议（5-2000 字）" style="width:100%;min-height:120px;padding:10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#fff;line-height:1.7;resize:vertical;"></textarea></div>
+        <div id="pfStatus" style="min-height:18px;font-size:12px;color:#FF8FA0;margin-bottom:8px;"></div>
+        <div style="display:flex;gap:10px;">
+          <button id="pfCancel" style="flex:1;padding:11px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:transparent;color:var(--muted);">关闭</button>
+          <button id="pfSubmit" style="flex:1;padding:11px;border-radius:10px;border:0;background:var(--q-color);color:#fff;font-weight:700;">提交反馈</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(mask);
+    const close = () => mask.remove();
+    mask.addEventListener('click', e => { if(e.target === mask) close(); });
+    document.getElementById('pfCancel').addEventListener('click', close);
+    document.getElementById('pfSubmit').addEventListener('click', async () => {
+      const status = document.getElementById('pfStatus');
+      const content = document.getElementById('pfContent').value.trim();
+      if(content.length < 5){ status.textContent = '反馈内容至少 5 个字。'; return; }
+      const btn = document.getElementById('pfSubmit');
+      btn.disabled = true; btn.textContent = '提交中…'; status.textContent = '';
+      try {
+        const res = await fetch(API_BASE + '/api/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: document.getElementById('pfType').value,
+            content: content,
+            name: document.getElementById('pfName').value.trim(),
+            email: document.getElementById('pfEmail').value.trim(),
+            role: u ? (u.role === 'admin' ? 'admin' : 'parent') : 'guest',
+            userEmail: u && u.email ? u.email : '',
+            page: 'parent-contact'
+          })
+        });
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok || !data.success) throw new Error(data.error || '提交失败');
+        status.style.color = '#6BE3A5';
+        status.textContent = '已收到，感谢你的反馈。';
+        document.getElementById('pfContent').value = '';
+      } catch(err){
+        status.style.color = '#FF8FA0';
+        status.textContent = err.message || '提交失败';
+      } finally {
+        btn.disabled = false; btn.textContent = '提交反馈';
+      }
+    });
+  }
+
+  let adminFeedbackRows = [];
+  async function loadAdminFeedback(){
+    const status = $('adminFeedbackStatus');
+    const list = $('adminFeedbackList');
+    if(!list) return;
+    try {
+      const res = await adminFetch('/api/admin/feedback');
+      if(!res) return;
+      const data = await res.json();
+      if(!res.ok || !data.success) throw new Error(data.error || '读取失败');
+      const rows = data.list || [];
+      adminFeedbackRows = rows;
+      if(status){ status.textContent = rows.length ? rows.length + ' 条' : '暂无反馈'; status.className = 'admin-policy-status ' + (rows.length ? 'on' : 'off'); }
+      if(!rows.length){ list.innerHTML = '<div class="empty-state">还没有家长端反馈。</div>'; return; }
+      list.innerHTML = rows.map(f => {
+        const who = f.name || f.userEmail || f.email || '匿名';
+        const contact = [f.email, f.userEmail].filter(Boolean).join(' · ');
+        const reply = f.reply ? '<div class="feedback-admin-reply"><b>已回复 · ' + formatTime(f.replyAt) + '</b><br>' + escapeHTML(String(f.reply)).replace(/\n/g, '<br>') + '</div>' : '';
+        return '<div class="admin-record"><div class="admin-record-main"><b>' + escapeHTML(who) + '</b><span>' + escapeHTML(contact || '未留邮箱') + ' · ' + formatTime(f.createdAt) + '</span><div style="margin-top:6px;font-size:12px;color:#DDE2FF;line-height:1.6;">' + escapeHTML(String(f.content || '')).replace(/\n/g, '<br>') + '</div>' + reply + '</div><div class="admin-student-actions"><button data-fb-reply="' + f.id + '">邮件回复</button></div></div>';
+      }).join('');
+      list.querySelectorAll('[data-fb-reply]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const f = adminFeedbackRows.find(x => String(x.id) === String(btn.dataset.fbReply));
+          openParentFeedbackReply(f);
+        });
+      });
+    } catch(err){
+      if(status){ status.textContent = '读取失败'; status.className = 'admin-policy-status off'; }
+      list.innerHTML = '<div class="empty-state" style="color:#FF8FA0;">' + escapeHTML(err.message || '读取失败') + '</div>';
+    }
+  }
+
+  function openParentFeedbackReply(f){
+    if(!f) return;
+    const to = String(f.email || f.userEmail || '').trim();
+    if(!to){ toast('该反馈没有留下邮箱，无法邮件回复', 'err'); return; }
+    const old = document.getElementById('parentReplyMask');
+    if(old) old.remove();
+    const mask = document.createElement('div');
+    mask.id = 'parentReplyMask';
+    mask.style.cssText = 'position:fixed;inset:0;background:rgba(3,4,12,.86);backdrop-filter:blur(10px);z-index:410;display:grid;place-items:center;padding:20px;';
+    mask.innerHTML = `
+      <div style="width:100%;max-width:560px;padding:26px;border-radius:18px;border:1px solid rgba(255,255,255,.1);background:#0B0D1C;">
+        <h2 style="font-size:20px;color:#fff;margin-bottom:6px;">邮件回复</h2>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">收件人：${escapeHTML(to)} · 通过 QBTI 虚拟邮箱发送</p>
+        <div style="margin-bottom:10px;"><label style="font-size:11px;color:var(--muted);">邮件主题</label><input id="prSubject" maxlength="120" value="关于你的反馈回复" style="width:100%;padding:10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#fff;" /></div>
+        <div style="margin-bottom:10px;"><label style="font-size:11px;color:var(--muted);">回复内容</label><textarea id="prBody" maxlength="5000" style="width:100%;min-height:160px;padding:10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#fff;line-height:1.7;resize:vertical;"></textarea></div>
+        <div id="prStatus" style="min-height:18px;font-size:12px;color:#FF8FA0;margin-bottom:8px;"></div>
+        <div style="display:flex;gap:10px;"><button id="prCancel" style="flex:1;padding:11px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:transparent;color:var(--muted);">取消</button><button id="prSend" style="flex:1;padding:11px;border-radius:10px;border:0;background:var(--q-color);color:#fff;font-weight:700;">发送邮件</button></div>
+      </div>
+    `;
+    document.body.appendChild(mask);
+    const close = () => mask.remove();
+    mask.addEventListener('click', e => { if(e.target === mask) close(); });
+    document.getElementById('prCancel').addEventListener('click', close);
+    document.getElementById('prSend').addEventListener('click', async () => {
+      const body = document.getElementById('prBody').value.trim();
+      const status = document.getElementById('prStatus');
+      if(!body){ status.textContent = '请填写回复内容。'; return; }
+      const btn = document.getElementById('prSend');
+      btn.disabled = true; btn.textContent = '发送中…'; status.textContent = '';
+      try {
+        const res = await adminFetch('/api/admin/feedback/' + encodeURIComponent(f.id) + '/reply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ subject: document.getElementById('prSubject').value.trim() || '关于你的反馈回复', body: body })
+        });
+        if(!res) return;
+        const data = await res.json().catch(() => ({}));
+        if(!res.ok || !data.success) throw new Error(data.error || '发送失败');
+        close();
+        toast('回复邮件已发送至 ' + (data.replyTo || to), 'ok');
+        loadAdminFeedback();
+      } catch(err){
+        status.textContent = err.message || '发送失败';
+      } finally {
+        btn.disabled = false; btn.textContent = '发送邮件';
+      }
+    });
+  }
+
   async function renderDashboard(){
     currentView = 'dashboard';
     lastReport = null;
@@ -1116,6 +1268,7 @@
           <span>${escapeHTML(currentParent.username)}</span>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
+          <button class="unbind-btn" id="btnParentFeedback">📨 投诉与反馈</button>
           <button class="unbind-btn" id="btnAccountInfo">账户信息</button>
           <button class="logout-btn" id="btnLogout">退出登录</button>
         </div>
@@ -1135,6 +1288,7 @@
       renderHome(); 
     });
     $('btnAccountInfo').addEventListener('click', openAccountInfo);
+    $('btnParentFeedback').addEventListener('click', openParentFeedback);
     
     $('btnAddStudent').addEventListener('click', openBindDialog);
 

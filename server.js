@@ -69,6 +69,7 @@ const AI_LOCK_MS = 15 * 60 * 1000;
 const AI_LANGS = ['zh-CN', 'zh-TW', 'en', 'es', 'pt', 'ko', 'ja', 'fr'];
 const aiInFlight = new Set();
 const aiCooldown = new Map();
+const feedbackCooldowns = new Map();
 
 /* ---------- 管理员账户（家长端最高权限） ---------- */
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123456';
@@ -228,6 +229,30 @@ async function initDB() {
     );`);
     await pool.query(`ALTER TABLE ai_usage ADD COLUMN IF NOT EXISTS tokens BIGINT NOT NULL DEFAULT 0;`);
     await pool.query(`ALTER TABLE ai_usage ADD COLUMN IF NOT EXISTS "lockedUntil" BIGINT NOT NULL DEFAULT 0;`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS feedback (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(100),
+      email VARCHAR(255),
+      role VARCHAR(20),
+      type VARCHAR(20),
+      content TEXT NOT NULL,
+      "userEmail" VARCHAR(255),
+      page VARCHAR(50),
+      app VARCHAR(20) NOT NULL DEFAULT 'student',
+      reply TEXT,
+      "replySubject" VARCHAR(255),
+      "replyAt" BIGINT,
+      "replyBy" VARCHAR(255),
+      "replyTo" VARCHAR(255),
+      "createdAt" BIGINT NOT NULL
+    );`);
+    await pool.query(`ALTER TABLE feedback ADD COLUMN IF NOT EXISTS app VARCHAR(20) NOT NULL DEFAULT 'student';`);
+    await pool.query(`ALTER TABLE feedback ADD COLUMN IF NOT EXISTS reply TEXT;`);
+    await pool.query(`ALTER TABLE feedback ADD COLUMN IF NOT EXISTS "replySubject" VARCHAR(255);`);
+    await pool.query(`ALTER TABLE feedback ADD COLUMN IF NOT EXISTS "replyAt" BIGINT;`);
+    await pool.query(`ALTER TABLE feedback ADD COLUMN IF NOT EXISTS "replyBy" VARCHAR(255);`);
+    await pool.query(`ALTER TABLE feedback ADD COLUMN IF NOT EXISTS "replyTo" VARCHAR(255);`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback ("createdAt" DESC);`);
     await pool.query(`CREATE TABLE IF NOT EXISTS admin_policy (
       id VARCHAR(32) PRIMARY KEY,
       enabled BOOLEAN NOT NULL DEFAULT TRUE,
@@ -336,6 +361,54 @@ async function sendCodeEmail(to, code) {
     return { ok: sendRes.ok };
   } catch (err) {
     return { ok: false };
+  }
+}
+
+function escapeEmailHtml(text){
+  return String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+async function sendFeedbackReplyEmail(to, subject, body, feedback) {
+  if (!AGENTMAIL_API_KEY) return { ok: false, error: '未配置邮件服务' };
+  if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return { ok: false, error: '收件邮箱无效' };
+  const inbox = await ensureInbox();
+  if (!inbox) return { ok: false, error: '邮件服务不可用' };
+  const safeBody = escapeEmailHtml(body).replace(/\n/g, '<br>');
+  const safeOriginal = escapeEmailHtml(String(feedback.content || '').slice(0, 600)).replace(/\n/g, '<br>');
+  try {
+    const sendRes = await fetch(
+      AGENTMAIL_BASE + '/inboxes/' + inbox + '/messages/send',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + AGENTMAIL_API_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          to,
+          subject: '【QBTI 家长端】' + (subject || '关于你的反馈回复'),
+          html: [
+            '<div style="font-family:sans-serif;max-width:560px;margin:auto;padding:32px;background:#0B0D1C;color:#E9EBFF;border-radius:16px;">',
+            '  <h2 style="color:#fff;margin-bottom:16px;">QBTI 反馈回复</h2>',
+            '  <p style="color:#8B90B8;line-height:1.7;">你好，感谢你的反馈。以下是管理员给你的回复：</p>',
+            '  <div style="margin:20px 0;padding:16px;border-radius:12px;background:rgba(124,92,255,.12);color:#E9EBFF;line-height:1.8;">' + safeBody + '</div>',
+            '  <p style="color:#8B90B8;font-size:12px;margin-top:24px;">你提交的原始反馈：</p>',
+            '  <div style="padding:12px;border-left:3px solid #5A8CF5;color:#A8AEDA;font-size:13px;line-height:1.7;">' + safeOriginal + '</div>',
+            '  <p style="color:#8B90B8;font-size:12px;margin-top:24px;">如需继续沟通，请联系：1182332400@qq.com</p>',
+            '</div>'
+          ].join('\n')
+        })
+      }
+    );
+    if (!sendRes.ok) return { ok: false, error: '邮件发送失败' };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: '邮件发送异常' };
   }
 }
 
@@ -1141,6 +1214,106 @@ app.post('/api/generate-ai-report', async (req, res) => {
     res.status(500).json({ error: '生成失败，请稍后再试', code: 'AI_ERROR' });
   } finally {
     aiInFlight.delete(pe);
+  }
+});
+
+/* ============================================================
+   投诉与反馈（家长端）
+   ============================================================ */
+app.post('/api/feedback', async (req, res) => {
+  const ip = String((req.headers['x-forwarded-for'] || '').split(',')[0] || req.ip || 'unknown').trim();
+  const now = Date.now();
+  const last = feedbackCooldowns.get(ip) || 0;
+  if (now - last < 15 * 1000) {
+    return res.status(429).json({ error: '提交太频繁，请稍后再试', code: 'RATE_LIMIT' });
+  }
+
+  const body = req.body || {};
+  const type = ['suggestion', 'complaint', 'other'].includes(body.type) ? body.type : 'suggestion';
+  const content = String(body.content || '').trim();
+  if (content.length < 5 || content.length > 2000) {
+    return res.status(400).json({ error: '反馈内容需要 5-2000 字', code: 'BAD_CONTENT' });
+  }
+  const name = String(body.name || '').trim().slice(0, 50);
+  const email = String(body.email || '').trim().slice(0, 255);
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: '邮箱格式不正确', code: 'BAD_EMAIL' });
+  }
+  const role = ['student', 'parent', 'admin', 'guest'].includes(body.role) ? body.role : 'parent';
+  const userEmail = String(body.userEmail || '').trim().toLowerCase().slice(0, 255);
+  const page = String(body.page || 'parent-contact').trim().slice(0, 50);
+
+  try {
+    const r = await pool.query(
+      `INSERT INTO feedback (name, email, role, type, content, "userEmail", page, app, "createdAt")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'parent', $8)
+       RETURNING id, "createdAt"`,
+      [name, email, role, type, content, userEmail, page, now]
+    );
+    feedbackCooldowns.set(ip, now);
+    if (feedbackCooldowns.size > 2000) {
+      const cutoff = now - 5 * 60 * 1000;
+      for (const [k, v] of feedbackCooldowns) {
+        if (v < cutoff) feedbackCooldowns.delete(k);
+      }
+    }
+    res.json({ success: true, id: r.rows[0].id, createdAt: Number(r.rows[0].createdAt) });
+  } catch (err) {
+    console.error('[家长反馈] 保存失败:', err.message);
+    res.status(500).json({ error: '服务器数据库异常', code: 'DB_ERROR' });
+  }
+});
+
+app.get('/api/admin/feedback', requireAdmin, async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT id, name, email, role, type, content, "userEmail", page, "createdAt",
+             app, reply, "replySubject", "replyAt", "replyBy", "replyTo"
+      FROM feedback
+      WHERE app = 'parent'
+      ORDER BY "createdAt" DESC
+      LIMIT 500
+    `);
+    const list = r.rows.map(row => Object.assign({}, row, { createdAt: Number(row.createdAt) || 0, replyAt: row.replyAt ? Number(row.replyAt) : null }));
+    res.json({ success: true, list: list, count: list.length });
+  } catch (err) {
+    console.error('[家长反馈] 管理员读取失败:', err.message);
+    res.status(500).json({ error: '服务器数据库异常', code: 'DB_ERROR' });
+  }
+});
+
+app.post('/api/admin/feedback/:id/reply', requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: '反馈 ID 不正确' });
+  const subject = String((req.body && req.body.subject) || '').trim().slice(0, 120) || '关于你的反馈回复';
+  const body = String((req.body && req.body.body) || '').trim();
+  if (body.length < 1 || body.length > 5000) {
+    return res.status(400).json({ error: '回复内容需要 1-5000 字' });
+  }
+  try {
+    const r = await pool.query(
+      `SELECT id, name, email, content, "userEmail" FROM feedback WHERE id = $1 AND app = 'parent'`,
+      [id]
+    );
+    const fb = r.rows[0];
+    if (!fb) return res.status(404).json({ error: '反馈不存在' });
+    const to = String(fb.email || fb.userEmail || '').trim();
+    if (!to) return res.status(400).json({ error: '该反馈没有可回复的邮箱' });
+
+    const sent = await sendFeedbackReplyEmail(to, subject, body, fb);
+    if (!sent.ok) return res.status(502).json({ error: sent.error || '邮件发送失败', code: 'MAIL_FAILED' });
+
+    const now = Date.now();
+    await pool.query(
+      `UPDATE feedback
+       SET reply = $1, "replySubject" = $2, "replyAt" = $3, "replyBy" = $4, "replyTo" = $5
+       WHERE id = $6`,
+      [body, subject, now, 'Administrator', to, id]
+    );
+    res.json({ success: true, replyAt: now, replyTo: to });
+  } catch (err) {
+    console.error('[家长反馈回复] 失败:', err.message);
+    res.status(500).json({ error: '服务器数据库异常', code: 'DB_ERROR' });
   }
 });
 
