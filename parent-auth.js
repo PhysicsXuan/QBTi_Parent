@@ -777,12 +777,12 @@
         <p>登录家长账户后，即可查看孩子的量子态报告。</p>
         <button id="btnShowLogin" style="max-width:200px;margin:0 auto 12px;display:block;">登录家长账户</button>
         <button id="btnShowRegister" style="max-width:200px;margin:0 auto 12px;display:block;background:transparent;border:1px solid rgba(255,255,255,.14);color:#fff;">注册家长账户</button>
-        <button id="btnGateFeedback" style="max-width:240px;margin:0 auto;display:block;background:transparent;border:0;color:var(--muted);font-size:12px;">投诉与反馈 · 1182332400@qq.com</button>
+        <button id="btnGateFeedback" class="parent-feedback-hero" style="margin-top:10px;"><b>📨 投诉与反馈</b><span>遇到问题或有建议？点这里告诉我们 · 1182332400@qq.com</span></button>
       </div>
     `;
     $('btnShowLogin').addEventListener('click', () => openAuth('login'));
     $('btnShowRegister').addEventListener('click', () => openAuth('register'));
-    $('btnGateFeedback').addEventListener('click', openParentFeedback);
+    $('btnGateFeedback').addEventListener('click', renderParentFeedbackPage);
   }
 
   /* ---------- 管理员控制台（家长端最高权限） ---------- */
@@ -822,6 +822,10 @@
         <div class="user-chip"><span class="avatar">A</span><span>Administrator</span><span class="admin-badge">ADMIN</span></div>
         <button class="logout-btn" id="btnLogout">退出登录</button>
       </div>
+      <button class="parent-feedback-hero" id="btnAdminFeedbackPage">
+        <b>📨 投诉与反馈</b>
+        <span>查看家长端反馈，或自己提交投诉与建议 · 1182332400@qq.com</span>
+      </button>
       <div class="admin-stat-grid" id="adminStats"><div class="empty-state">加载中…</div></div>
       <div class="admin-policy">
         <div class="admin-policy-head"><span>学生端管理员 · Administrator</span><span class="admin-policy-status" id="adminPolicyStatus">加载中…</span></div>
@@ -862,6 +866,7 @@
     });
     $('adminRefresh').addEventListener('click', () => loadAdminData($('adminSearch').value));
     $('adminHealth').addEventListener('click', adminHealthCheck);
+    $('btnAdminFeedbackPage').addEventListener('click', renderParentFeedbackPage);
     $('adminPolicySave').addEventListener('click', saveStudentAdminPolicy);
     $('adminPolicyPwdBtn').addEventListener('click', resetStudentAdminPassword);
     let timer = null;
@@ -1114,54 +1119,74 @@
     }
   }
 
-  function openParentFeedback(){
-    const old = document.getElementById('parentFeedbackMask');
-    if(old) old.remove();
+  function renderParentFeedbackPage(){
+    currentView = 'feedback';
     const u = currentParent;
-    const mask = document.createElement('div');
-    mask.id = 'parentFeedbackMask';
-    mask.style.cssText = 'position:fixed;inset:0;background:rgba(3,4,12,.86);backdrop-filter:blur(10px);z-index:400;display:grid;place-items:center;padding:20px;';
-    mask.innerHTML = `
-      <div style="width:100%;max-width:540px;max-height:90vh;overflow-y:auto;padding:26px;border-radius:18px;border:1px solid rgba(255,255,255,.1);background:#0B0D1C;">
-        <div style="font-size:11px;letter-spacing:.22em;color:var(--muted);text-transform:uppercase;margin-bottom:8px;">Feedback · 投诉与反馈</div>
-        <h2 style="font-size:22px;color:#fff;margin-bottom:8px;">写给 QBTI 团队</h2>
-        <p style="font-size:12.5px;color:var(--muted);line-height:1.7;margin-bottom:16px;">遇到问题、想投诉，或对问卷和产品有建议，都可以写在这里。管理员会通过邮件回复你。<br><b style="color:#DDE2FF;">我们将通过邮件的方式联系您。</b><br>联系邮箱：1182332400@qq.com</p>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
-          <div><label style="font-size:11px;color:var(--muted);">类型</label><select id="pfType" style="width:100%;padding:10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:#11142A;color:#fff;"><option value="suggestion">建议</option><option value="complaint">投诉</option><option value="other">其他</option></select></div>
-          <div><label style="font-size:11px;color:var(--muted);">称呼（选填）</label><input id="pfName" maxlength="50" value="${escapeHTML(u ? (u.username || '') : '')}" style="width:100%;padding:10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#fff;" /></div>
-        </div>
-        <div style="margin-bottom:10px;"><label style="font-size:11px;color:var(--muted);">联系邮箱（必填）</label><input id="pfEmail" type="email" maxlength="255" required value="${escapeHTML(u ? (u.email || '') : '')}" style="width:100%;padding:10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#fff;" /></div>
-        <div style="margin-bottom:10px;"><label style="font-size:11px;color:var(--muted);">反馈内容</label><textarea id="pfContent" maxlength="2000" placeholder="请描述问题、投诉内容或建议（5-2000 字）" style="width:100%;min-height:120px;padding:10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#fff;line-height:1.7;resize:vertical;"></textarea></div>
-        <div id="pfStatus" style="min-height:18px;font-size:12px;color:#FF8FA0;margin-bottom:8px;"></div>
-        <div style="display:flex;gap:10px;">
-          <button id="pfCancel" style="flex:1;padding:11px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:transparent;color:var(--muted);">关闭</button>
-          <button id="pfSubmit" style="flex:1;padding:11px;border-radius:10px;border:0;background:var(--q-color);color:#fff;font-weight:700;">提交反馈</button>
+    const back = () => {
+      if(u && u.role === 'admin') renderAdminDashboard();
+      else if(u) renderDashboard();
+      else renderGate();
+    };
+    app.innerHTML = `
+      <button class="back-btn" id="btnParentFeedbackBack">← 返回</button>
+      <div class="feedback-page">
+        <div class="feedback-kicker">CONTACT</div>
+        <h1 class="feedback-page-title">联系我们</h1>
+        <p class="feedback-page-text">如果你希望了解项目、提出建议，或者参与后续的量子态映射研究，可以通过邮件或下方反馈表单与我们联系。</p>
+        <a class="contact-mail" href="mailto:1182332400@qq.com">1182332400@qq.com</a>
+        <div class="feedback-card">
+          <h3>投诉与反馈</h3>
+          <p class="feedback-sub">遇到问题、想投诉，或对问卷和产品有建议，都可以写在这里。所有反馈会汇总到家长端管理员后台。<b style="color:#DDE2FF;">我们将通过邮件的方式联系您。</b></p>
+          <div class="feedback-grid">
+            <div class="feedback-field">
+              <label for="pfbType">类型</label>
+              <select class="feedback-select" id="pfbType">
+                <option value="suggestion">建议</option>
+                <option value="complaint">投诉</option>
+                <option value="other">其他</option>
+              </select>
+            </div>
+            <div class="feedback-field">
+              <label for="pfbName">称呼（选填）</label>
+              <input class="feedback-input" id="pfbName" type="text" maxlength="50" value="${escapeHTML(u ? (u.username || '') : '')}" placeholder="怎么称呼你" />
+            </div>
+          </div>
+          <div class="feedback-field">
+            <label for="pfbEmail">联系邮箱（必填）</label>
+            <input class="feedback-input" id="pfbEmail" type="email" maxlength="255" required value="${escapeHTML(u ? (u.email || '') : '')}" placeholder="请填写常用邮箱，我们将通过邮件联系你" />
+          </div>
+          <div class="feedback-field">
+            <label for="pfbContent">反馈内容</label>
+            <textarea class="feedback-textarea" id="pfbContent" maxlength="2000" placeholder="请描述你遇到的问题、投诉内容或对问卷的建议（5-2000 字）"></textarea>
+          </div>
+          <button class="feedback-submit" id="pfbSubmit" type="button">提交反馈</button>
+          <div class="feedback-status" id="pfbStatus"></div>
         </div>
       </div>
     `;
-    document.body.appendChild(mask);
-    const close = () => mask.remove();
-    mask.addEventListener('click', e => { if(e.target === mask) close(); });
-    document.getElementById('pfCancel').addEventListener('click', close);
-    document.getElementById('pfSubmit').addEventListener('click', async () => {
-      const status = document.getElementById('pfStatus');
-      const content = document.getElementById('pfContent').value.trim();
-      const email = document.getElementById('pfEmail').value.trim();
-      if(content.length < 5){ status.textContent = '反馈内容至少 5 个字。'; return; }
+    document.getElementById('btnParentFeedbackBack').addEventListener('click', back);
+    document.getElementById('pfbSubmit').addEventListener('click', async () => {
+      const status = document.getElementById('pfbStatus');
+      const contentEl = document.getElementById('pfbContent');
+      const content = contentEl.value.trim();
+      const email = document.getElementById('pfbEmail').value.trim();
+      if(content.length < 5){ status.className = 'feedback-status err'; status.textContent = '反馈内容至少 5 个字。'; return; }
       if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+        status.className = 'feedback-status err';
         status.textContent = '请填写正确的联系邮箱，我们将通过邮件的方式联系您。';
         return;
       }
-      const btn = document.getElementById('pfSubmit');
-      btn.disabled = true; btn.textContent = '提交中…'; status.textContent = '';
+      const btn = document.getElementById('pfbSubmit');
+      btn.disabled = true; btn.textContent = '提交中…';
+      status.className = 'feedback-status'; status.textContent = '';
       try {
         const res = await fetch(API_BASE + '/api/feedback', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            type: document.getElementById('pfType').value,
+            type: document.getElementById('pfbType').value,
             content: content,
-            name: document.getElementById('pfName').value.trim(),
+            name: document.getElementById('pfbName').value.trim(),
             email: email,
             role: u ? (u.role === 'admin' ? 'admin' : 'parent') : 'guest',
             userEmail: u && u.email ? u.email : '',
@@ -1170,12 +1195,12 @@
         });
         const data = await res.json().catch(() => ({}));
         if(!res.ok || !data.success) throw new Error(data.error || '提交失败');
-        status.style.color = '#6BE3A5';
+        status.className = 'feedback-status ok';
         status.textContent = '已收到，感谢你的反馈。';
-        document.getElementById('pfContent').value = '';
+        contentEl.value = '';
       } catch(err){
-        status.style.color = '#FF8FA0';
-        status.textContent = err.message || '提交失败';
+        status.className = 'feedback-status err';
+        status.textContent = err.message || '提交失败，请稍后再试';
       } finally {
         btn.disabled = false; btn.textContent = '提交反馈';
       }
@@ -1286,11 +1311,14 @@
           <span>${escapeHTML(currentParent.username)}</span>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
-          <button class="unbind-btn" id="btnParentFeedback">📨 投诉与反馈</button>
           <button class="unbind-btn" id="btnAccountInfo">账户信息</button>
           <button class="logout-btn" id="btnLogout">退出登录</button>
         </div>
       </div>
+      <button class="parent-feedback-hero" id="btnParentFeedback">
+        <b>📨 投诉与反馈</b>
+        <span>遇到问题或有建议？点这里告诉我们 · 1182332400@qq.com</span>
+      </button>
       <div class="topbar" style="margin-bottom:24px;">
         <div style="font-size:13px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;">已绑定的孩子（数量不限）</div>
         <button class="add-student-btn" id="btnAddStudent">+ 绑定孩子</button>
@@ -1306,7 +1334,7 @@
       renderHome(); 
     });
     $('btnAccountInfo').addEventListener('click', openAccountInfo);
-    $('btnParentFeedback').addEventListener('click', openParentFeedback);
+    $('btnParentFeedback').addEventListener('click', renderParentFeedbackPage);
     
     $('btnAddStudent').addEventListener('click', openBindDialog);
 
