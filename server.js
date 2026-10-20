@@ -950,6 +950,7 @@ app.post('/api/admin/student-admin-record/:id/generate', requireAdmin, async (re
     payload.aiReport = content;
     payload.aiReportLang = lang;
     payload.aiReportSource = 'ai';
+    payload.aiReportAudience = 'parent';
     payload.aiReportAt = Date.now();
     await pool.query(
       'UPDATE admin_quiz_records SET payload = $1, "createdAt" = $2 WHERE id = $3',
@@ -1082,6 +1083,7 @@ app.post('/api/generate-ai-report', async (req, res) => {
     payload.aiReport = content;
     payload.aiReportLang = lg;
     payload.aiReportSource = 'ai';
+    payload.aiReportAudience = 'parent';
     payload.aiReportAt = Date.now();
     let saved = true;
     try {
