@@ -30,7 +30,7 @@
       noAI: '孩子尚未生成 AI 报告，家长可在此直接生成',
       localNote: '当前显示的是本地模板报告，点击下方按钮可由 AI 生成个性化分析。',
       langNote: '当前报告为 %s；点击下方按钮可用当前语言重新生成。',
-      cached: '已读取已保存的报告', error: '生成失败，请稍后再试',
+      cached: '已读取已保存的报告', error: '生成失败，请稍后再试', tokenError: '报告生成错误，请稍后再试。',
       limit: '今日生成次数已达上限，请明天再试。', cooldown: '请等待 %s 秒后再生成。',
       inFlight: '正在生成，请稍候。', notBound: '未绑定该学生。', noReport: '该学生尚未提交报告。',
       levels: { high: '高可信', medium: '基本可信', low: '可信度偏低', very_low: '可信度存疑' },
@@ -52,7 +52,7 @@
       noAI: '孩子尚未生成 AI 報告，家長可在此直接生成',
       localNote: '目前顯示的是本地模板報告，點擊下方按鈕可由 AI 生成個人化分析。',
       langNote: '目前報告為 %s；點擊下方按鈕可用當前語言重新生成。',
-      cached: '已讀取已保存的報告', error: '生成失敗，請稍後再試',
+      cached: '已讀取已保存的報告', error: '生成失敗，請稍後再試', tokenError: '報告生成錯誤，請稍後再試。',
       limit: '今日生成次數已達上限，請明天再試。', cooldown: '請等待 %s 秒後再生成。',
       inFlight: '正在生成，請稍候。', notBound: '未綁定該學生。', noReport: '該學生尚未提交報告。',
       levels: { high: '高可信', medium: '基本可信', low: '可信度偏低', very_low: '可信度存疑' },
@@ -74,7 +74,7 @@
       noAI: 'The student has not generated an AI report yet. You can generate one here.',
       localNote: 'This is a local template report. Use the button below to generate a personalized AI analysis.',
       langNote: 'This report is in %s. Use the button below to regenerate it in the current language.',
-      cached: 'Loaded from the saved report', error: 'Generation failed. Please try again later.',
+      cached: 'Loaded from the saved report', error: 'Generation failed. Please try again later.', tokenError: 'Report generation failed. Please try again later.',
       limit: 'Daily generation limit reached. Please try again tomorrow.', cooldown: 'Please wait %s seconds before generating again.',
       inFlight: 'A report is already being generated. Please wait.', notBound: 'This student is not bound to your account.', noReport: 'The student has not submitted a report yet.',
       levels: { high: 'High confidence', medium: 'Mostly reliable', low: 'Low confidence', very_low: 'Questionable' },
@@ -96,7 +96,7 @@
       noAI: 'El estudiante aún no ha generado un informe con IA. Puedes generarlo aquí.',
       localNote: 'Este es un informe de plantilla local. Usa el botón de abajo para generar un análisis personalizado con IA.',
       langNote: 'Este informe está en %s. Usa el botón de abajo para regenerarlo en el idioma actual.',
-      cached: 'Informe guardado cargado', error: 'No se pudo generar. Inténtalo más tarde.',
+      cached: 'Informe guardado cargado', error: 'No se pudo generar. Inténtalo más tarde.', tokenError: 'No se pudo generar el informe. Inténtalo de nuevo más tarde.',
       limit: 'Se alcanzó el límite diario. Inténtalo mañana.', cooldown: 'Espera %s segundos antes de volver a generar.',
       inFlight: 'Ya se está generando un informe. Espera un momento.', notBound: 'Este estudiante no está vinculado a tu cuenta.', noReport: 'El estudiante aún no ha enviado un informe.',
       levels: { high: 'Alta confianza', medium: 'Bastante fiable', low: 'Confianza baja', very_low: 'Cuestionable' },
@@ -118,7 +118,7 @@
       noAI: 'O estudante ainda não gerou um relatório com IA. Você pode gerar aqui.',
       localNote: 'Este é um relatório modelo local. Use o botão abaixo para gerar uma análise personalizada com IA.',
       langNote: 'Este relatório está em %s. Use o botão abaixo para regerá-lo no idioma atual.',
-      cached: 'Relatório salvo carregado', error: 'Falha ao gerar. Tente novamente mais tarde.',
+      cached: 'Relatório salvo carregado', error: 'Falha ao gerar. Tente novamente mais tarde.', tokenError: 'Falha ao gerar o relatório. Tente novamente mais tarde.',
       limit: 'Limite diário atingido. Tente novamente amanhã.', cooldown: 'Aguarde %s segundos antes de gerar novamente.',
       inFlight: 'Um relatório já está sendo gerado. Aguarde.', notBound: 'Este estudante não está vinculado à sua conta.', noReport: 'O estudante ainda não enviou um relatório.',
       levels: { high: 'Alta confiança', medium: 'Bastante confiável', low: 'Baixa confiança', very_low: 'Questionável' },
@@ -140,7 +140,7 @@
       noAI: '학생이 아직 AI 보고서를 생성하지 않았습니다. 여기에서 생성할 수 있습니다.',
       localNote: '현재 로컬 템플릿 보고서입니다. 아래 버튼으로 AI 맞춤 분석을 생성할 수 있습니다.',
       langNote: '현재 보고서는 %s로 작성되었습니다. 아래 버튼으로 현재 언어로 다시 생성할 수 있습니다.',
-      cached: '저장된 보고서를 불러왔습니다', error: '생성에 실패했습니다. 잠시 후 다시 시도하세요.',
+      cached: '저장된 보고서를 불러왔습니다', error: '생성에 실패했습니다. 잠시 후 다시 시도하세요.', tokenError: '보고서 생성에 실패했습니다. 잠시 후 다시 시도하세요.',
       limit: '오늘의 생성 한도에 도달했습니다. 내일 다시 시도하세요.', cooldown: '%s초 후에 다시 생성하세요.',
       inFlight: '이미 보고서를 생성 중입니다. 잠시 기다려 주세요.', notBound: '이 학생은 계정에 연결되어 있지 않습니다.', noReport: '학생이 아직 보고서를 제출하지 않았습니다.',
       levels: { high: '높은 신뢰도', medium: '대체로 신뢰할 수 있음', low: '낮은 신뢰도', very_low: '의심스러움' },
@@ -162,7 +162,7 @@
       noAI: '生徒はまだAIレポートを生成していません。ここで生成できます。',
       localNote: '現在表示されているのはローカルテンプレートです。下のボタンでAIによる個別分析を生成できます。',
       langNote: 'このレポートは%sで作成されています。下のボタンで現在の言語に再生成できます。',
-      cached: '保存済みレポートを読み込みました', error: '生成に失敗しました。しばらくしてからお試しください。',
+      cached: '保存済みレポートを読み込みました', error: '生成に失敗しました。しばらくしてからお試しください。', tokenError: 'レポートの生成に失敗しました。しばらくしてから再度お試しください。',
       limit: '本日の生成上限に達しました。明日もう一度お試しください。', cooldown: '%s秒後に再度生成してください。',
       inFlight: 'すでにレポートを生成中です。お待ちください。', notBound: 'この生徒はアカウントに紐付いていません。', noReport: '生徒はまだレポートを提出していません。',
       levels: { high: '高い信頼度', medium: 'ほぼ信頼できる', low: '信頼度が低い', very_low: '疑わしい' },
@@ -184,7 +184,7 @@
       noAI: 'L’élève n’a pas encore généré de rapport IA. Vous pouvez le faire ici.',
       localNote: 'Il s’agit d’un modèle local. Utilisez le bouton ci-dessous pour générer une analyse personnalisée par IA.',
       langNote: 'Ce rapport est en %s. Utilisez le bouton ci-dessous pour le régénérer dans la langue actuelle.',
-      cached: 'Rapport enregistré chargé', error: 'Échec de la génération. Réessayez plus tard.',
+      cached: 'Rapport enregistré chargé', error: 'Échec de la génération. Réessayez plus tard.', tokenError: 'Échec de la génération du rapport. Réessayez plus tard.',
       limit: 'Limite quotidienne atteinte. Réessayez demain.', cooldown: 'Veuillez attendre %s secondes avant de régénérer.',
       inFlight: 'Un rapport est déjà en cours de génération. Veuillez patienter.', notBound: 'Cet élève n’est pas lié à votre compte.', noReport: 'L’élève n’a pas encore soumis de rapport.',
       levels: { high: 'Confiance élevée', medium: 'Plutôt fiable', low: 'Faible confiance', very_low: 'Douteux' },
@@ -1416,6 +1416,7 @@
     if(code === 'IN_FLIGHT') return T('inFlight');
     if(code === 'NOT_BOUND') return T('notBound');
     if(code === 'NO_REPORT') return T('noReport');
+    if(code === 'TOKEN_LOCK' || code === 'TOKEN_ANOMALY') return T('tokenError');
     return (data && data.error) || T('error');
   }
 

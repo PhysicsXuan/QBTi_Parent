@@ -61,6 +61,11 @@ try {
 /* ---------- AI 防刷参数 ---------- */
 const AI_COOLDOWN_MS = 60 * 1000;
 const AI_DAILY_LIMIT = 10;
+const AI_HARD_MAX_TOKENS = 2600;
+const AI_MAX_PROMPT_CHARS = 9000;
+const AI_MAX_TOTAL_TOKENS = 4500;
+const AI_TOKEN_BUDGET = 40000;
+const AI_LOCK_MS = 15 * 60 * 1000;
 const AI_LANGS = ['zh-CN', 'zh-TW', 'en', 'es', 'pt', 'ko', 'ja', 'fr'];
 const aiInFlight = new Set();
 const aiCooldown = new Map();
@@ -124,8 +129,16 @@ function localDay() {
 }
 
 async function getAIUsage(parentEmail, day) {
-  const r = await pool.query('SELECT count FROM ai_usage WHERE "parentEmail" = $1 AND day = $2', [parentEmail, day]);
-  return r.rows[0] ? Number(r.rows[0].count) : 0;
+  const r = await pool.query(
+    'SELECT count, tokens, "lockedUntil" FROM ai_usage WHERE "parentEmail" = $1 AND day = $2',
+    [parentEmail, day]
+  );
+  if (!r.rows[0]) return { count: 0, tokens: 0, lockedUntil: 0 };
+  return {
+    count: Number(r.rows[0].count) || 0,
+    tokens: Number(r.rows[0].tokens) || 0,
+    lockedUntil: Number(r.rows[0].lockedUntil) || 0
+  };
 }
 
 async function incAIUsage(parentEmail, day) {
@@ -134,6 +147,50 @@ async function incAIUsage(parentEmail, day) {
      ON CONFLICT ("parentEmail", day) DO UPDATE SET count = ai_usage.count + 1`,
     [parentEmail, day]
   );
+}
+
+async function addAITokens(parentEmail, day, tokens) {
+  const n = Math.max(0, Number(tokens) || 0);
+  if (n <= 0) return 0;
+  const r = await pool.query(
+    `INSERT INTO ai_usage ("parentEmail", day, count, tokens) VALUES ($1, $2, 0, $3)
+     ON CONFLICT ("parentEmail", day) DO UPDATE SET tokens = ai_usage.tokens + EXCLUDED.tokens
+     RETURNING tokens`,
+    [parentEmail, day, n]
+  );
+  return Number(r.rows[0] && r.rows[0].tokens) || 0;
+}
+
+async function lockAIUsage(parentEmail, day, ms) {
+  const until = Date.now() + (ms || AI_LOCK_MS);
+  await pool.query(
+    `INSERT INTO ai_usage ("parentEmail", day, count, tokens, "lockedUntil")
+     VALUES ($1, $2, 0, 0, $3)
+     ON CONFLICT ("parentEmail", day) DO UPDATE
+     SET "lockedUntil" = GREATEST(ai_usage."lockedUntil", $3)`,
+    [parentEmail, day, until]
+  );
+  return until;
+}
+
+function estimateTokens(text) {
+  return Math.ceil(String(text || '').length / 2);
+}
+
+function checkTokenAnomaly(usage, prompt, content) {
+  const u = usage || {};
+  const promptTokens = Number(u.prompt_tokens) || estimateTokens(prompt);
+  const completionTokens = Number(u.completion_tokens) || estimateTokens(content);
+  const total = Number(u.total_tokens) || (promptTokens + completionTokens);
+  return {
+    promptTokens,
+    completionTokens,
+    total,
+    anomaly: total > AI_MAX_TOTAL_TOKENS ||
+             promptTokens > AI_MAX_PROMPT_CHARS ||
+             completionTokens > AI_HARD_MAX_TOKENS ||
+             String(prompt || '').length > AI_MAX_PROMPT_CHARS
+  };
 }
 
 /* 用数据库里的报告数据在服务端构建提示词；客户端不再传 prompt */
@@ -165,8 +222,12 @@ async function initDB() {
       "parentEmail" VARCHAR(255) NOT NULL,
       day VARCHAR(10) NOT NULL,
       count INTEGER NOT NULL DEFAULT 0,
+      tokens BIGINT NOT NULL DEFAULT 0,
+      "lockedUntil" BIGINT NOT NULL DEFAULT 0,
       PRIMARY KEY ("parentEmail", day)
     );`);
+    await pool.query(`ALTER TABLE ai_usage ADD COLUMN IF NOT EXISTS tokens BIGINT NOT NULL DEFAULT 0;`);
+    await pool.query(`ALTER TABLE ai_usage ADD COLUMN IF NOT EXISTS "lockedUntil" BIGINT NOT NULL DEFAULT 0;`);
     await pool.query(`CREATE TABLE IF NOT EXISTS admin_policy (
       id VARCHAR(32) PRIMARY KEY,
       enabled BOOLEAN NOT NULL DEFAULT TRUE,
@@ -836,11 +897,22 @@ app.post('/api/admin/student-admin-record/:id/generate', requireAdmin, async (re
     }
     const day = localDay();
     const used = await getAIUsage(adminEmail, day);
-    if (used >= AI_DAILY_LIMIT) {
+    if (used.lockedUntil > Date.now()) {
+      return res.status(429).json({ error: '报告生成错误，请稍后再试', code: 'TOKEN_LOCK' });
+    }
+    if (used.tokens >= AI_TOKEN_BUDGET) {
+      await lockAIUsage(adminEmail, day, AI_LOCK_MS);
+      return res.status(429).json({ error: '报告生成错误，请稍后再试', code: 'TOKEN_ANOMALY' });
+    }
+    if (used.count >= AI_DAILY_LIMIT) {
       return res.status(429).json({ error: '今日生成次数已达上限', code: 'DAILY_LIMIT', limit: AI_DAILY_LIMIT });
     }
     const prompt = buildServerPrompt(payload, lang);
     if (!prompt) return res.status(500).json({ error: '构建提示词失败', code: 'PROMPT_FAILED' });
+    if (prompt.length > AI_MAX_PROMPT_CHARS) {
+      await lockAIUsage(adminEmail, day, AI_LOCK_MS);
+      return res.status(429).json({ error: '报告生成错误，请稍后再试', code: 'TOKEN_ANOMALY' });
+    }
 
     aiInFlight.add(adminEmail);
     aiCooldown.set(cooldownKey, now);
@@ -855,7 +927,7 @@ app.post('/api/admin/student-admin-record/:id/generate', requireAdmin, async (re
           { role: 'user', content: prompt }
         ],
         temperature: 0.85,
-        max_tokens: 2400,
+        max_tokens: Math.min(2400, AI_HARD_MAX_TOKENS),
         stream: false
       })
     });
@@ -863,6 +935,17 @@ app.post('/api/admin/student-admin-record/:id/generate', requireAdmin, async (re
     const data = await response.json();
     const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
     if (!content) throw new Error('API 返回内容为空');
+
+    const tokenCheck = checkTokenAnomaly(data.usage, prompt, content);
+    if (tokenCheck.anomaly) {
+      await lockAIUsage(adminEmail, day, AI_LOCK_MS);
+      return res.status(429).json({ error: '报告生成错误，请稍后再试', code: 'TOKEN_ANOMALY' });
+    }
+    let totalTokens = 0;
+    try { totalTokens = await addAITokens(adminEmail, day, tokenCheck.total); } catch(e){}
+    if (totalTokens >= AI_TOKEN_BUDGET) {
+      await lockAIUsage(adminEmail, day, AI_LOCK_MS);
+    }
 
     payload.aiReport = content;
     payload.aiReportLang = lang;
@@ -942,13 +1025,24 @@ app.post('/api/generate-ai-report', async (req, res) => {
     /* 5) 每日上限（数据库持久化，重启不重置） */
     const day = localDay();
     const used = await getAIUsage(pe, day);
-    if (used >= AI_DAILY_LIMIT) {
+    if (used.lockedUntil > Date.now()) {
+      return res.status(429).json({ error: '报告生成错误，请稍后再试', code: 'TOKEN_LOCK' });
+    }
+    if (used.tokens >= AI_TOKEN_BUDGET) {
+      await lockAIUsage(pe, day, AI_LOCK_MS);
+      return res.status(429).json({ error: '报告生成错误，请稍后再试', code: 'TOKEN_ANOMALY' });
+    }
+    if (used.count >= AI_DAILY_LIMIT) {
       return res.status(429).json({ error: '今日生成次数已达上限', code: 'DAILY_LIMIT', limit: AI_DAILY_LIMIT });
     }
 
     /* 6) 服务端构建提示词，客户端不能传任意 prompt */
     const prompt = buildServerPrompt(payload, lg);
     if (!prompt) return res.status(500).json({ error: '构建提示词失败', code: 'PROMPT_FAILED' });
+    if (prompt.length > AI_MAX_PROMPT_CHARS) {
+      await lockAIUsage(pe, day, AI_LOCK_MS);
+      return res.status(429).json({ error: '报告生成错误，请稍后再试', code: 'TOKEN_ANOMALY' });
+    }
 
     aiInFlight.add(pe);
     aiCooldown.set(cooldownKey, now);
@@ -963,7 +1057,7 @@ app.post('/api/generate-ai-report', async (req, res) => {
           { role: 'user', content: prompt }
         ],
         temperature: 0.85,
-        max_tokens: 2400,
+        max_tokens: Math.min(2400, AI_HARD_MAX_TOKENS),
         stream: false
       })
     });
@@ -972,6 +1066,17 @@ app.post('/api/generate-ai-report', async (req, res) => {
     const data = await response.json();
     const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
     if (!content) throw new Error('API 返回内容为空');
+
+    const tokenCheck = checkTokenAnomaly(data.usage, prompt, content);
+    if (tokenCheck.anomaly) {
+      await lockAIUsage(pe, day, AI_LOCK_MS);
+      return res.status(429).json({ error: '报告生成错误，请稍后再试', code: 'TOKEN_ANOMALY' });
+    }
+    let totalTokens = 0;
+    try { totalTokens = await addAITokens(pe, day, tokenCheck.total); } catch(e){}
+    if (totalTokens >= AI_TOKEN_BUDGET) {
+      await lockAIUsage(pe, day, AI_LOCK_MS);
+    }
 
     /* 7) 服务端直接落库，客户端不再调 update-ai */
     payload.aiReport = content;
