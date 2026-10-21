@@ -60,15 +60,17 @@ try {
 
 /* ---------- AI 防刷参数 ---------- */
 const AI_COOLDOWN_MS = 60 * 1000;
-const AI_DAILY_LIMIT = 10;
 const AI_HARD_MAX_TOKENS = 2600;
 const AI_MAX_PROMPT_CHARS = 9000;
 const AI_MAX_TOTAL_TOKENS = 4500;
-const AI_TOKEN_BUDGET = 40000;
 const AI_LOCK_MS = 15 * 60 * 1000;
+const AI_BURST_WINDOW_MS = 10 * 1000;
+const AI_BURST_TOKEN_LIMIT = 8000;
+const AI_BURST_LOCK_MS = 10 * 60 * 1000;
 const AI_LANGS = ['zh-CN', 'zh-TW', 'en', 'es', 'pt', 'ko', 'ja', 'fr'];
 const aiInFlight = new Set();
 const aiCooldown = new Map();
+const aiBurst = new Map();
 const feedbackCooldowns = new Map();
 
 /* ---------- 管理员账户（家长端最高权限） ---------- */
@@ -160,6 +162,31 @@ async function addAITokens(parentEmail, day, tokens) {
     [parentEmail, day, n]
   );
   return Number(r.rows[0] && r.rows[0].tokens) || 0;
+}
+
+function burstStatus(email){
+  const now = Date.now();
+  const entry = aiBurst.get(email) || { events: [], lockedUntil: 0 };
+  entry.events = (entry.events || []).filter(e => e && e.ts > now - AI_BURST_WINDOW_MS);
+  const tokens = entry.events.reduce((sum, e) => sum + (Number(e.tokens) || 0), 0);
+  const locked = entry.lockedUntil > now || tokens >= AI_BURST_TOKEN_LIMIT;
+  return { locked, tokens, count: entry.events.length, lockedUntil: entry.lockedUntil || 0 };
+}
+
+function recordAIBurst(email, tokens){
+  const now = Date.now();
+  const entry = aiBurst.get(email) || { events: [], lockedUntil: 0 };
+  entry.events = (entry.events || []).filter(e => e && e.ts > now - AI_BURST_WINDOW_MS);
+  const n = Math.max(0, Number(tokens) || 0);
+  if(n <= 0) return burstStatus(email);
+  entry.events.push({ ts: now, tokens: n });
+  entry.events = entry.events.slice(-30);
+  const total = entry.events.reduce((sum, e) => sum + (Number(e.tokens) || 0), 0);
+  if(total >= AI_BURST_TOKEN_LIMIT){
+    entry.lockedUntil = now + AI_BURST_LOCK_MS;
+  }
+  aiBurst.set(email, entry);
+  return burstStatus(email);
 }
 
 async function lockAIUsage(parentEmail, day, ms) {
@@ -985,7 +1012,6 @@ app.post('/api/admin/student-admin-record/:id/generate', requireAdmin, async (re
   if (!QBTI) return res.status(500).json({ error: '服务端提示词模块未加载', code: 'NO_CORE' });
 
   const adminEmail = 'admin@qbti.local';
-  const adminBypass = adminEmail === 'admin@qbti.local';
   try {
     const r = await pool.query('SELECT * FROM admin_quiz_records WHERE id = $1', [id]);
     const row = r.rows[0];
@@ -1010,21 +1036,13 @@ app.post('/api/admin/student-admin-record/:id/generate', requireAdmin, async (re
       return res.status(429).json({ error: '请求过于频繁，请稍后再试', code: 'COOLDOWN', wait });
     }
     const day = localDay();
-    const used = await getAIUsage(adminEmail, day);
-    if (!adminBypass && used.lockedUntil > Date.now()) {
-      return res.status(429).json({ error: '报告生成错误，请稍后再试', code: 'TOKEN_LOCK' });
-    }
-    if (!adminBypass && used.tokens >= AI_TOKEN_BUDGET) {
-      await lockAIUsage(adminEmail, day, AI_LOCK_MS);
-      return res.status(429).json({ error: '报告生成错误，请稍后再试', code: 'TOKEN_ANOMALY' });
-    }
-    if (!adminBypass && used.count >= AI_DAILY_LIMIT) {
-      return res.status(429).json({ error: '今日生成次数已达上限', code: 'DAILY_LIMIT', limit: AI_DAILY_LIMIT });
+    const burstBefore = burstStatus(adminEmail);
+    if (burstBefore.locked) {
+      return res.status(429).json({ error: '加载失败，请稍后再试', code: 'TOKEN_BURST' });
     }
     const prompt = buildServerPrompt(payload, lang);
     if (!prompt) return res.status(500).json({ error: '构建提示词失败', code: 'PROMPT_FAILED' });
     if (prompt.length > AI_MAX_PROMPT_CHARS) {
-      await lockAIUsage(adminEmail, day, AI_LOCK_MS);
       return res.status(429).json({ error: '报告生成错误，请稍后再试', code: 'TOKEN_ANOMALY' });
     }
 
@@ -1051,15 +1069,11 @@ app.post('/api/admin/student-admin-record/:id/generate', requireAdmin, async (re
     if (!content) throw new Error('API 返回内容为空');
 
     const tokenCheck = checkTokenAnomaly(data.usage, prompt, content);
-    if (tokenCheck.anomaly && !adminBypass) {
-      await lockAIUsage(adminEmail, day, AI_LOCK_MS);
-      return res.status(429).json({ error: '报告生成错误，请稍后再试', code: 'TOKEN_ANOMALY' });
+    const burstAfter = recordAIBurst(adminEmail, tokenCheck.total);
+    if (tokenCheck.anomaly || burstAfter.locked) {
+      return res.status(429).json({ error: '加载失败，请稍后再试', code: 'TOKEN_BURST' });
     }
-    let totalTokens = 0;
-    try { totalTokens = await addAITokens(adminEmail, day, tokenCheck.total); } catch(e){}
-    if (totalTokens >= AI_TOKEN_BUDGET && !adminBypass) {
-      await lockAIUsage(adminEmail, day, AI_LOCK_MS);
-    }
+    try { await addAITokens(adminEmail, day, tokenCheck.total); } catch(e){}
 
     payload.aiReport = content;
     payload.aiReportLang = lang;
@@ -1139,23 +1153,15 @@ app.post('/api/generate-ai-report', async (req, res) => {
 
     /* 5) 每日上限（数据库持久化，重启不重置） */
     const day = localDay();
-    const used = await getAIUsage(pe, day);
-    if (used.lockedUntil > Date.now()) {
-      return res.status(429).json({ error: '报告生成错误，请稍后再试', code: 'TOKEN_LOCK' });
-    }
-    if (used.tokens >= AI_TOKEN_BUDGET) {
-      await lockAIUsage(pe, day, AI_LOCK_MS);
-      return res.status(429).json({ error: '报告生成错误，请稍后再试', code: 'TOKEN_ANOMALY' });
-    }
-    if (used.count >= AI_DAILY_LIMIT) {
-      return res.status(429).json({ error: '今日生成次数已达上限', code: 'DAILY_LIMIT', limit: AI_DAILY_LIMIT });
+    const burstBefore = burstStatus(pe);
+    if (burstBefore.locked) {
+      return res.status(429).json({ error: '加载失败，请稍后再试', code: 'TOKEN_BURST' });
     }
 
     /* 6) 服务端构建提示词，客户端不能传任意 prompt */
     const prompt = buildServerPrompt(payload, lg);
     if (!prompt) return res.status(500).json({ error: '构建提示词失败', code: 'PROMPT_FAILED' });
     if (prompt.length > AI_MAX_PROMPT_CHARS) {
-      await lockAIUsage(pe, day, AI_LOCK_MS);
       return res.status(429).json({ error: '报告生成错误，请稍后再试', code: 'TOKEN_ANOMALY' });
     }
 
@@ -1183,15 +1189,11 @@ app.post('/api/generate-ai-report', async (req, res) => {
     if (!content) throw new Error('API 返回内容为空');
 
     const tokenCheck = checkTokenAnomaly(data.usage, prompt, content);
-    if (tokenCheck.anomaly) {
-      await lockAIUsage(pe, day, AI_LOCK_MS);
-      return res.status(429).json({ error: '报告生成错误，请稍后再试', code: 'TOKEN_ANOMALY' });
+    const burstAfter = recordAIBurst(pe, tokenCheck.total);
+    if (tokenCheck.anomaly || burstAfter.locked) {
+      return res.status(429).json({ error: '加载失败，请稍后再试', code: 'TOKEN_BURST' });
     }
-    let totalTokens = 0;
-    try { totalTokens = await addAITokens(pe, day, tokenCheck.total); } catch(e){}
-    if (totalTokens >= AI_TOKEN_BUDGET) {
-      await lockAIUsage(pe, day, AI_LOCK_MS);
-    }
+    try { await addAITokens(pe, day, tokenCheck.total); } catch(e){}
 
     /* 7) 服务端直接落库，客户端不再调 update-ai */
     payload.aiReport = content;
