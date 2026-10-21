@@ -985,6 +985,7 @@ app.post('/api/admin/student-admin-record/:id/generate', requireAdmin, async (re
   if (!QBTI) return res.status(500).json({ error: '服务端提示词模块未加载', code: 'NO_CORE' });
 
   const adminEmail = 'admin@qbti.local';
+  const adminBypass = adminEmail === 'admin@qbti.local';
   try {
     const r = await pool.query('SELECT * FROM admin_quiz_records WHERE id = $1', [id]);
     const row = r.rows[0];
@@ -1010,14 +1011,14 @@ app.post('/api/admin/student-admin-record/:id/generate', requireAdmin, async (re
     }
     const day = localDay();
     const used = await getAIUsage(adminEmail, day);
-    if (used.lockedUntil > Date.now()) {
+    if (!adminBypass && used.lockedUntil > Date.now()) {
       return res.status(429).json({ error: '报告生成错误，请稍后再试', code: 'TOKEN_LOCK' });
     }
-    if (used.tokens >= AI_TOKEN_BUDGET) {
+    if (!adminBypass && used.tokens >= AI_TOKEN_BUDGET) {
       await lockAIUsage(adminEmail, day, AI_LOCK_MS);
       return res.status(429).json({ error: '报告生成错误，请稍后再试', code: 'TOKEN_ANOMALY' });
     }
-    if (used.count >= AI_DAILY_LIMIT) {
+    if (!adminBypass && used.count >= AI_DAILY_LIMIT) {
       return res.status(429).json({ error: '今日生成次数已达上限', code: 'DAILY_LIMIT', limit: AI_DAILY_LIMIT });
     }
     const prompt = buildServerPrompt(payload, lang);
@@ -1050,13 +1051,13 @@ app.post('/api/admin/student-admin-record/:id/generate', requireAdmin, async (re
     if (!content) throw new Error('API 返回内容为空');
 
     const tokenCheck = checkTokenAnomaly(data.usage, prompt, content);
-    if (tokenCheck.anomaly) {
+    if (tokenCheck.anomaly && !adminBypass) {
       await lockAIUsage(adminEmail, day, AI_LOCK_MS);
       return res.status(429).json({ error: '报告生成错误，请稍后再试', code: 'TOKEN_ANOMALY' });
     }
     let totalTokens = 0;
     try { totalTokens = await addAITokens(adminEmail, day, tokenCheck.total); } catch(e){}
-    if (totalTokens >= AI_TOKEN_BUDGET) {
+    if (totalTokens >= AI_TOKEN_BUDGET && !adminBypass) {
       await lockAIUsage(adminEmail, day, AI_LOCK_MS);
     }
 
