@@ -792,7 +792,7 @@
         <p>登录家长账户后，即可查看孩子的量子态报告。</p>
         <button id="btnShowLogin" style="max-width:200px;margin:0 auto 12px;display:block;">登录家长账户</button>
         <button id="btnShowRegister" style="max-width:200px;margin:0 auto 12px;display:block;background:transparent;border:1px solid rgba(255,255,255,.14);color:#fff;">注册家长账户</button>
-        <button id="btnGateFeedback" class="parent-feedback-hero" style="margin-top:10px;"><b>📨 投诉与反馈</b><span>遇到问题或有建议？点这里告诉我们 · 1182332400@qq.com</span></button>
+        <button id="btnGateFeedback" class="parent-feedback-hero" type="button"><span class="pfh-icon" aria-hidden="true">✉</span><b>投诉与反馈</b><span class="pfh-desc">遇到问题或有建议？点这里告诉我们 · 1182332400@qq.com</span><span class="pfh-arrow" aria-hidden="true">→</span></button>
       </div>
     `;
     $('btnShowLogin').addEventListener('click', () => openAuth('login'));
@@ -837,9 +837,11 @@
         <div class="user-chip"><span class="avatar">A</span><span>Administrator</span><span class="admin-badge">ADMIN</span></div>
         <button class="logout-btn" id="btnLogout">退出登录</button>
       </div>
-      <button class="parent-feedback-hero" id="btnAdminFeedbackPage">
-        <b>📨 投诉与反馈</b>
-        <span>查看家长端反馈，或自己提交投诉与建议 · 1182332400@qq.com</span>
+      <button class="parent-feedback-hero" id="btnAdminFeedbackPage" type="button">
+        <span class="pfh-icon" aria-hidden="true">✉</span>
+        <b>投诉与反馈</b>
+        <span class="pfh-desc">查看家长端反馈，或自己提交投诉与建议 · 1182332400@qq.com</span>
+        <span class="pfh-arrow" aria-hidden="true">→</span>
       </button>
       <div class="admin-stat-grid" id="adminStats"><div class="empty-state">加载中…</div></div>
       <div class="admin-policy">
@@ -1330,9 +1332,11 @@
           <button class="logout-btn" id="btnLogout">退出登录</button>
         </div>
       </div>
-      <button class="parent-feedback-hero" id="btnParentFeedback">
-        <b>📨 投诉与反馈</b>
-        <span>遇到问题或有建议？点这里告诉我们 · 1182332400@qq.com</span>
+      <button class="parent-feedback-hero" id="btnParentFeedback" type="button">
+        <span class="pfh-icon" aria-hidden="true">✉</span>
+        <b>投诉与反馈</b>
+        <span class="pfh-desc">遇到问题或有建议？点这里告诉我们 · 1182332400@qq.com</span>
+        <span class="pfh-arrow" aria-hidden="true">→</span>
       </button>
       <div class="topbar" style="margin-bottom:24px;">
         <div style="font-size:13px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;">已绑定的孩子（数量不限）</div>
