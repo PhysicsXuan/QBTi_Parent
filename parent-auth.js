@@ -199,6 +199,21 @@
     }
   };
 
+  const FB_UI = {
+    'zh-CN': { pageTitle:'联系我们', pageText:'如果你希望了解项目、提出建议，或者参与后续的量子态映射研究，可以通过邮件或下方反馈表单与我们联系。', title:'投诉与反馈', sub:'遇到问题、想投诉，或对问卷和产品有建议，都可以写在这里。所有反馈会汇总到家长端管理员后台。', note:'我们将通过邮件的方式联系您。', type:'类型', suggestion:'建议', complaint:'投诉', other:'其他', name:'称呼（选填）', namePh:'怎么称呼你', email:'联系邮箱（必填）', emailPh:'请填写常用邮箱，我们将通过邮件联系你', content:'反馈内容', contentPh:'请描述你遇到的问题、投诉内容或对问卷的建议（5-2000 字）', submit:'提交反馈', sending:'提交中…', success:'已收到，感谢你的反馈。', contentError:'反馈内容至少 5 个字。', emailError:'请填写正确的联系邮箱，我们将通过邮件的方式联系您。', fail:'提交失败，请稍后再试' },
+    'zh-TW': { pageTitle:'聯絡我們', pageText:'如果你希望了解專案、提出建議，或參與後續的量子態映射研究，可以透過郵件或下方回饋表單與我們聯絡。', title:'投訴與回饋', sub:'遇到問題、想投訴，或對問卷和產品有建議，都可以寫在這裡。所有回饋會彙總到家長端管理員後台。', note:'我們將透過郵件與您聯絡。', type:'類型', suggestion:'建議', complaint:'投訴', other:'其他', name:'稱呼（選填）', namePh:'怎麼稱呼你', email:'聯絡郵箱（必填）', emailPh:'請填寫常用郵箱，我們將透過郵件聯絡你', content:'回饋內容', contentPh:'請描述你遇到的問題、投訴內容或對問卷的建議（5-2000 字）', submit:'提交回饋', sending:'提交中…', success:'已收到，感謝你的回饋。', contentError:'回饋內容至少 5 個字。', emailError:'請填寫正確的聯絡郵箱，我們將透過郵件與您聯絡。', fail:'提交失敗，請稍後再試' },
+    en: { pageTitle:'Contact', pageText:'If you would like to learn about the project, offer suggestions, or take part in future quantum-state mapping research, contact us by email or with the form below.', title:'Complaints & Feedback', sub:'If you have a problem, a complaint, or a suggestion about the questionnaire or product, write it here. All feedback goes to the parent administrator.', note:'We will contact you by email.', type:'Type', suggestion:'Suggestion', complaint:'Complaint', other:'Other', name:'Name (optional)', namePh:'How should we address you?', email:'Contact email (required)', emailPh:'Enter an email we can use to contact you', content:'Feedback', contentPh:'Describe the issue, complaint, or suggestion (5–2000 characters)', submit:'Submit feedback', sending:'Submitting…', success:'Received. Thank you for your feedback.', contentError:'Feedback must be at least 5 characters.', emailError:'Enter a valid contact email. We will contact you by email.', fail:'Submission failed. Please try again later.' },
+    es: { pageTitle:'Contacto', pageText:'Si quieres conocer el proyecto, dar sugerencias o participar en la investigación futura, contáctanos por correo o con el formulario.', title:'Quejas y comentarios', sub:'Si tienes un problema, una queja o una sugerencia sobre el cuestionario o el producto, escríbelo aquí. Todos los comentarios llegan al administrador de padres.', note:'Te contactaremos por correo electrónico.', type:'Tipo', suggestion:'Sugerencia', complaint:'Queja', other:'Otro', name:'Nombre (opcional)', namePh:'¿Cómo quieres que te llamemos?', email:'Correo de contacto (obligatorio)', emailPh:'Escribe un correo para poder contactarte', content:'Comentario', contentPh:'Describe el problema, la queja o la sugerencia (5–2000 caracteres)', submit:'Enviar comentario', sending:'Enviando…', success:'Recibido. Gracias por tu comentario.', contentError:'El comentario debe tener al menos 5 caracteres.', emailError:'Escribe un correo válido. Te contactaremos por email.', fail:'No se pudo enviar. Inténtalo más tarde.' },
+    pt: { pageTitle:'Contato', pageText:'Se quiser conhecer o projeto, dar sugestões ou participar da pesquisa futura, fale conosco por email ou pelo formulário.', title:'Reclamações e feedback', sub:'Se tiver um problema, uma reclamação ou uma sugestão sobre o questionário ou o produto, escreva aqui. Todo o feedback vai para o administrador de pais.', note:'Entraremos em contacto por email.', type:'Tipo', suggestion:'Sugestão', complaint:'Reclamação', other:'Outro', name:'Nome (opcional)', namePh:'Como devemos chamar você?', email:'Email de contacto (obrigatório)', emailPh:'Digite um email para entrarmos em contacto', content:'Feedback', contentPh:'Descreva o problema, a reclamação ou a sugestão (5–2000 caracteres)', submit:'Enviar feedback', sending:'Enviando…', success:'Recebido. Obrigado pelo seu feedback.', contentError:'O feedback deve ter pelo menos 5 caracteres.', emailError:'Digite um email válido. Entraremos em contacto por email.', fail:'Falha ao enviar. Tente novamente mais tarde.' },
+    ko: { pageTitle:'문의', pageText:'프로젝트에 대해 알고 싶거나 제안하고 싶거나 향후 연구에 참여하고 싶다면 이메일 또는 아래 양식으로 연락해 주세요.', title:'불편 신고 및 피드백', sub:'설문이나 제품에 문제, 불만, 제안이 있다면 여기에 적어 주세요. 모든 피드백은 학부모 관리자에게 전달됩니다.', note:'이메일로 연락드립니다.', type:'유형', suggestion:'제안', complaint:'불만', other:'기타', name:'이름 (선택)', namePh:'어떻게 불러 드릴까요?', email:'연락 이메일 (필수)', emailPh:'연락받을 이메일을 입력해 주세요', content:'피드백 내용', contentPh:'문제, 불만 또는 제안을 적어 주세요 (5–2000자)', submit:'피드백 보내기', sending:'보내는 중…', success:'접수되었습니다. 피드백 감사합니다.', contentError:'피드백은 5자 이상이어야 합니다.', emailError:'올바른 연락 이메일을 입력해 주세요. 이메일로 연락드립니다.', fail:'전송에 실패했습니다. 잠시 후 다시 시도해 주세요.' },
+    ja: { pageTitle:'お問い合わせ', pageText:'プロジェクトについて知りたい、提案したい、今後の研究に参加したい場合は、メールまたは下のフォームからご連絡ください。', title:'ご意見・ご不満', sub:'アンケートや製品についての問題、ご不満、ご提案があればここに書いてください。すべてのフィードバックは保護者管理者に届きます。', note:'メールでご連絡します。', type:'種類', suggestion:'提案', complaint:'ご不満', other:'その他', name:'お名前（任意）', namePh:'何とお呼びすればよいですか？', email:'連絡先メール（必須）', emailPh:'連絡用のメールアドレスを入力してください', content:'フィードバック内容', contentPh:'問題、ご不満、ご提案をご記入ください（5〜2000文字）', submit:'フィードバックを送信', sending:'送信中…', success:'受け付けました。フィードバックありがとうございます。', contentError:'フィードバックは5文字以上で入力してください。', emailError:'正しい連絡先メールを入力してください。メールでご連絡します。', fail:'送信に失敗しました。しばらくしてから再度お試しください。' },
+    fr: { pageTitle:'Contact', pageText:'Si vous souhaitez découvrir le projet, faire une suggestion ou participer à la recherche future, contactez-nous par email ou via le formulaire ci-dessous.', title:'Réclamations et retours', sub:'Si vous avez un problème, une réclamation ou une suggestion concernant le questionnaire ou le produit, écrivez-le ici. Tous les retours vont à l’administrateur parent.', note:'Nous vous contacterons par email.', type:'Type', suggestion:'Suggestion', complaint:'Réclamation', other:'Autre', name:'Nom (facultatif)', namePh:'Comment devons-nous vous appeler ?', email:'Email de contact (obligatoire)', emailPh:'Saisissez un email pour vous contacter', content:'Votre retour', contentPh:'Décrivez le problème, la réclamation ou la suggestion (5–2000 caractères)', submit:'Envoyer le retour', sending:'Envoi…', success:'Bien reçu. Merci pour votre retour.', contentError:'Le retour doit contenir au moins 5 caractères.', emailError:'Saisissez un email valide. Nous vous contacterons par email.', fail:'Échec de l’envoi. Réessayez plus tard.' }
+  };
+  function fbt(key){
+    const d = FB_UI[currentLang] || FB_UI['zh-CN'];
+    return d[key] != null ? d[key] : (FB_UI['zh-CN'][key] || key);
+  }
+
   function currentLangName(){ return LANG_NAMES[currentLang] || currentLang; }
   function T(key){
     const d = PT[currentLang] || PT['zh-CN'];
@@ -1128,38 +1143,38 @@
       else renderGate();
     };
     app.innerHTML = `
-      <button class="back-btn" id="btnParentFeedbackBack">← 返回</button>
+      <button class="back-btn" id="btnParentFeedbackBack">${T('back')}</button>
       <div class="feedback-page">
         <div class="feedback-kicker">CONTACT</div>
-        <h1 class="feedback-page-title">联系我们</h1>
-        <p class="feedback-page-text">如果你希望了解项目、提出建议，或者参与后续的量子态映射研究，可以通过邮件或下方反馈表单与我们联系。</p>
+        <h1 class="feedback-page-title">${fbt('pageTitle')}</h1>
+        <p class="feedback-page-text">${fbt('pageText')}</p>
         <a class="contact-mail" href="mailto:1182332400@qq.com">1182332400@qq.com</a>
         <div class="feedback-card">
-          <h3>投诉与反馈</h3>
-          <p class="feedback-sub">遇到问题、想投诉，或对问卷和产品有建议，都可以写在这里。所有反馈会汇总到家长端管理员后台。<b style="color:#DDE2FF;">我们将通过邮件的方式联系您。</b></p>
+          <h3>${fbt('title')}</h3>
+          <p class="feedback-sub">${fbt('sub')}<b style="color:#DDE2FF;">${fbt('note')}</b></p>
           <div class="feedback-grid">
             <div class="feedback-field">
-              <label for="pfbType">类型</label>
+              <label for="pfbType">${fbt('type')}</label>
               <select class="feedback-select" id="pfbType">
-                <option value="suggestion">建议</option>
-                <option value="complaint">投诉</option>
-                <option value="other">其他</option>
+                <option value="suggestion">${fbt('suggestion')}</option>
+                <option value="complaint">${fbt('complaint')}</option>
+                <option value="other">${fbt('other')}</option>
               </select>
             </div>
             <div class="feedback-field">
-              <label for="pfbName">称呼（选填）</label>
-              <input class="feedback-input" id="pfbName" type="text" maxlength="50" value="${escapeHTML(u ? (u.username || '') : '')}" placeholder="怎么称呼你" />
+              <label for="pfbName">${fbt('name')}</label>
+              <input class="feedback-input" id="pfbName" type="text" maxlength="50" value="${escapeHTML(u ? (u.username || '') : '')}" placeholder="${fbt('namePh')}" />
             </div>
           </div>
           <div class="feedback-field">
-            <label for="pfbEmail">联系邮箱（必填）</label>
-            <input class="feedback-input" id="pfbEmail" type="email" maxlength="255" required value="${escapeHTML(u ? (u.email || '') : '')}" placeholder="请填写常用邮箱，我们将通过邮件联系你" />
+            <label for="pfbEmail">${fbt('email')}</label>
+            <input class="feedback-input" id="pfbEmail" type="email" maxlength="255" required value="${escapeHTML(u ? (u.email || '') : '')}" placeholder="${fbt('emailPh')}" />
           </div>
           <div class="feedback-field">
-            <label for="pfbContent">反馈内容</label>
-            <textarea class="feedback-textarea" id="pfbContent" maxlength="2000" placeholder="请描述你遇到的问题、投诉内容或对问卷的建议（5-2000 字）"></textarea>
+            <label for="pfbContent">${fbt('content')}</label>
+            <textarea class="feedback-textarea" id="pfbContent" maxlength="2000" placeholder="${fbt('contentPh')}"></textarea>
           </div>
-          <button class="feedback-submit" id="pfbSubmit" type="button">提交反馈</button>
+          <button class="feedback-submit" id="pfbSubmit" type="button">${fbt('submit')}</button>
           <div class="feedback-status" id="pfbStatus"></div>
         </div>
       </div>
@@ -1170,14 +1185,14 @@
       const contentEl = document.getElementById('pfbContent');
       const content = contentEl.value.trim();
       const email = document.getElementById('pfbEmail').value.trim();
-      if(content.length < 5){ status.className = 'feedback-status err'; status.textContent = '反馈内容至少 5 个字。'; return; }
+      if(content.length < 5){ status.className = 'feedback-status err'; status.textContent = fbt('contentError'); return; }
       if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
         status.className = 'feedback-status err';
-        status.textContent = '请填写正确的联系邮箱，我们将通过邮件的方式联系您。';
+        status.textContent = fbt('emailError');
         return;
       }
       const btn = document.getElementById('pfbSubmit');
-      btn.disabled = true; btn.textContent = '提交中…';
+      btn.disabled = true; btn.textContent = fbt('sending');
       status.className = 'feedback-status'; status.textContent = '';
       try {
         const res = await fetch(API_BASE + '/api/feedback', {
@@ -1196,13 +1211,13 @@
         const data = await res.json().catch(() => ({}));
         if(!res.ok || !data.success) throw new Error(data.error || '提交失败');
         status.className = 'feedback-status ok';
-        status.textContent = '已收到，感谢你的反馈。';
+        status.textContent = fbt('success');
         contentEl.value = '';
       } catch(err){
         status.className = 'feedback-status err';
-        status.textContent = err.message || '提交失败，请稍后再试';
+        status.textContent = fbt('fail');
       } finally {
-        btn.disabled = false; btn.textContent = '提交反馈';
+        btn.disabled = false; btn.textContent = fbt('submit');
       }
     });
   }
