@@ -302,6 +302,14 @@ async function initDB() {
       "createdAt" BIGINT NOT NULL,
       UNIQUE("studentEmail", "quizTs")
     );`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS quiz_records (
+      id SERIAL PRIMARY KEY,
+      "studentEmail" VARCHAR(255) NOT NULL,
+      "quizTs" BIGINT NOT NULL,
+      payload JSONB,
+      "createdAt" BIGINT NOT NULL,
+      UNIQUE("studentEmail", "quizTs")
+    );`);
     const salt = genSalt();
     await pool.query(
       `INSERT INTO admin_policy (id, enabled, salt, "passwordHash", "updatedAt", "updatedBy")
@@ -841,6 +849,111 @@ app.get('/api/admin/students', requireAdmin, async (req, res) => {
     res.json({ success: true, list });
   } catch (err) {
     console.error('[管理员学生列表] 失败:', err.message);
+    res.status(500).json({ error: '服务器数据库异常' });
+  }
+});
+
+app.get('/api/admin/parents', requireAdmin, async (req, res) => {
+  const q = String(req.query.q || '').trim().toLowerCase();
+  const like = '%' + q + '%';
+  try {
+    const result = await pool.query(`
+      SELECT p.email, p.username,
+             COALESCE(to_jsonb(p)->>'phone', '') AS phone,
+             p."createdAt",
+             (SELECT COUNT(*) FROM bindings b WHERE LOWER(b."parentEmail") = LOWER(p.email)) AS "boundCount",
+             (SELECT MAX(r."updatedAt")
+              FROM bindings b JOIN reports r ON LOWER(r."studentEmail") = LOWER(b."studentEmail")
+              WHERE LOWER(b."parentEmail") = LOWER(p.email)) AS "lastReportAt"
+      FROM parents p
+      WHERE ($1 = '' OR LOWER(p.email) LIKE $2 OR LOWER(COALESCE(p.username, '')) LIKE $2)
+      ORDER BY p."createdAt" DESC NULLS LAST
+      LIMIT 1000
+    `, [q, like]);
+    res.json({
+      success: true,
+      list: result.rows.map(row => ({
+        email: row.email,
+        username: row.username || '',
+        phone: row.phone || '',
+        createdAt: row.createdAt ? Number(row.createdAt) : null,
+        boundCount: Number(row.boundCount) || 0,
+        lastReportAt: row.lastReportAt ? Number(row.lastReportAt) : null
+      }))
+    });
+  } catch (err) {
+    console.error('[管理员家长列表] 失败:', err.message);
+    res.status(500).json({ error: '服务器数据库异常' });
+  }
+});
+
+app.get('/api/admin/parents/:email', requireAdmin, async (req, res) => {
+  const email = String(req.params.email || '').trim().toLowerCase();
+  if(!email) return res.status(400).json({ error: '缺少邮箱' });
+  try {
+    const parentRes = await pool.query(
+      'SELECT p.email, p.username, COALESCE(to_jsonb(p)->>\'phone\', \'\') AS phone, p."createdAt" FROM parents p WHERE LOWER(p.email) = $1',
+      [email]
+    );
+    const parent = parentRes.rows[0];
+    if(!parent) return res.status(404).json({ error: '家长账户不存在' });
+
+    const bindRes = await pool.query(`
+      SELECT b."studentEmail", b."boundAt", s.username AS "studentUsername", s."createdAt" AS "studentCreatedAt"
+      FROM bindings b
+      LEFT JOIN student_emails s ON LOWER(s.email) = LOWER(b."studentEmail")
+      WHERE LOWER(b."parentEmail") = $1
+      ORDER BY b."boundAt" DESC
+    `, [email]);
+    const studentEmails = bindRes.rows.map(r => r.studentEmail).filter(Boolean);
+    let histories = [];
+    let reportRows = [];
+    if(studentEmails.length){
+      const h = await pool.query(
+        `SELECT "studentEmail", "quizTs", payload FROM quiz_records
+         WHERE LOWER("studentEmail") = ANY($1) ORDER BY "quizTs" DESC LIMIT 5000`,
+        [studentEmails.map(e => String(e).toLowerCase())]
+      );
+      histories = h.rows;
+      const r = await pool.query(
+        `SELECT "studentEmail", payload, "updatedAt" FROM reports
+         WHERE LOWER("studentEmail") = ANY($1)`,
+        [studentEmails.map(e => String(e).toLowerCase())]
+      );
+      reportRows = r.rows;
+    }
+    const reportMap = {};
+    reportRows.forEach(r => { reportMap[String(r.studentEmail).toLowerCase()] = r; });
+    const historyMap = {};
+    histories.forEach(h => {
+      const key = String(h.studentEmail).toLowerCase();
+      if(!historyMap[key]) historyMap[key] = [];
+      historyMap[key].push({ ts: Number(h.quizTs) || 0, payload: h.payload || null });
+    });
+
+    res.json({
+      success: true,
+      parent: {
+        email: parent.email,
+        username: parent.username || '',
+        phone: parent.phone || '',
+        createdAt: Number(parent.createdAt) || null
+      },
+      students: bindRes.rows.map(b => {
+        const key = String(b.studentEmail).toLowerCase();
+        const rep = reportMap[key];
+        return {
+          email: b.studentEmail,
+          username: b.studentUsername || '',
+          createdAt: Number(b.studentCreatedAt) || null,
+          boundAt: Number(b.boundAt) || null,
+          history: historyMap[key] || [],
+          report: rep ? { payload: rep.payload || null, updatedAt: Number(rep.updatedAt) || null } : null
+        };
+      })
+    });
+  } catch (err) {
+    console.error('[管理员家长详情] 失败:', err.message);
     res.status(500).json({ error: '服务器数据库异常' });
   }
 });

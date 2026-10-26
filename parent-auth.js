@@ -845,6 +845,15 @@
       </button>
       <div class="admin-stat-grid" id="adminStats"><div class="empty-state">加载中…</div></div>
       <div class="admin-policy">
+        <div class="admin-policy-head"><span>家长账户 · 全部</span><span class="admin-policy-status" id="adminParentStatus">加载中…</span></div>
+        <div class="admin-policy-row">
+          <input id="adminParentSearch" class="admin-search" placeholder="搜索家长邮箱 / 用户名" />
+          <button class="unbind-btn" id="adminParentRefresh">搜索</button>
+        </div>
+        <div class="admin-record-list" id="adminParentList"><div class="empty-state">加载中…</div></div>
+        <div class="admin-parent-detail" id="adminParentDetail"></div>
+      </div>
+      <div class="admin-policy">
         <div class="admin-policy-head"><span>学生端管理员 · Administrator</span><span class="admin-policy-status" id="adminPolicyStatus">加载中…</span></div>
         <div class="admin-policy-row">
           <label><input type="checkbox" id="adminPolicyEnabled" /> 启用学生端管理员</label>
@@ -882,6 +891,8 @@
       renderHome();
     });
     $('adminRefresh').addEventListener('click', () => loadAdminData($('adminSearch').value));
+    $('adminParentRefresh').addEventListener('click', () => loadAdminParents($('adminParentSearch').value));
+    $('adminParentSearch').addEventListener('keydown', e => { if(e.key === 'Enter') loadAdminParents(e.target.value); });
     $('adminHealth').addEventListener('click', adminHealthCheck);
     $('btnAdminFeedbackPage').addEventListener('click', renderParentFeedbackPage);
     $('adminPolicySave').addEventListener('click', saveStudentAdminPolicy);
@@ -892,10 +903,96 @@
       timer = setTimeout(() => loadAdminData(e.target.value), 250);
     });
     loadAdminData('');
+    loadAdminParents('');
     loadStudentAdminPolicy();
     loadStudentAdminRecords();
     loadAdminFeedback();
   }
+  async function loadAdminParents(q){
+    const listEl = $('adminParentList');
+    const status = $('adminParentStatus');
+    if(!listEl) return;
+    if(status) status.textContent = '读取中…';
+    try {
+      const res = await adminFetch('/api/admin/parents?q=' + encodeURIComponent(q || ''));
+      if(!res) return;
+      const data = await res.json();
+      if(!res.ok || !data.success) throw new Error(data.error || '加载失败');
+      const rows = data.list || [];
+      if(status) status.textContent = '共 ' + rows.length + ' 个家长账户';
+      if(!rows.length){ listEl.innerHTML = '<div class="empty-state">没有匹配的家长账户。</div>'; return; }
+      listEl.innerHTML = rows.map(p => {
+        const name = p.username || p.email;
+        const meta = p.email + (p.phone ? ' · ' + p.phone : '') + ' · 绑定 ' + p.boundCount + ' 名学生';
+        return '<div class="admin-record">'
+          + '<div class="admin-record-main"><b>' + escapeHTML(name) + '</b><span>' + escapeHTML(meta) + '</span><span>注册：' + escapeHTML(formatTime(p.createdAt)) + (p.lastReportAt ? ' · 最近报告：' + escapeHTML(formatTime(p.lastReportAt)) : '') + '</span></div>'
+          + '<div class="admin-student-actions"><button data-parent="' + escapeHTML(p.email) + '">查看详情</button></div>'
+          + '</div>';
+      }).join('');
+      listEl.querySelectorAll('button[data-parent]').forEach(btn => {
+        btn.addEventListener('click', () => showAdminParent(btn.dataset.parent));
+      });
+    } catch(err){
+      if(status) status.textContent = '读取失败';
+      listEl.innerHTML = '<div class="empty-state" style="color:#FF8FA0;">' + escapeHTML(err.message || '读取失败') + '</div>';
+    }
+  }
+
+  function renderAdminParentDetail(data){
+    const host = $('adminParentDetail');
+    if(!host) return;
+    const parent = data.parent || {};
+    const students = data.students || [];
+    let html = '<div class="admin-parent-top"><div><b>' + escapeHTML(parent.username || parent.email) + '</b><br><span>' + escapeHTML(parent.email) + (parent.phone ? ' · ' + escapeHTML(parent.phone) : '') + ' · 注册 ' + escapeHTML(formatTime(parent.createdAt)) + '</span></div><button type="button" class="admin-parent-close" id="adminParentDetailClose">关闭</button></div>';
+    html += '<div class="admin-parent-block"><b>账户情况</b>绑定学生：' + students.length + ' 名';
+    if(!students.length){
+      html += '<div class="empty-state" style="padding:8px 0;">该家长还没有绑定学生。</div>';
+    } else {
+      students.forEach(st => {
+        const hist = st.history || [];
+        const latest = hist[0] && hist[0].payload ? hist[0].payload : null;
+        const code = latest ? (latest.code || (latest.letters ? latest.letters.join('') : '')) : '';
+        const report = st.report && st.report.payload ? st.report.payload : null;
+        html += '<div class="admin-parent-student">'
+          + '<div class="admin-parent-student-name">' + escapeHTML(st.username || st.email) + '</div>'
+          + '<div class="admin-parent-student-meta">' + escapeHTML(st.email) + ' · 绑定 ' + escapeHTML(formatTime(st.boundAt)) + ' · 历史 ' + hist.length + ' 条' + (code ? ' · 最新 ' + escapeHTML(code) : '') + '</div>';
+        if(report && report.aiReport){
+          html += '<div class="admin-parent-record"><details><summary>家长端解析报告</summary><pre>' + escapeHTML(String(report.aiReport)).slice(0, 12000) + '</pre></details></div>';
+        }
+        hist.forEach(h => {
+          const p = h.payload || {};
+          const c = p.code || (p.letters ? p.letters.join('') : '');
+          const qs = p.quantumState && (p.quantumState.type || p.quantumState);
+          const hidden = p.hiddenResult && p.hiddenResult.obtained ? (' · 隐藏 ' + (p.hiddenResult.key || '')) : '';
+          html += '<div class="admin-parent-record"><details><summary>' + escapeHTML(formatTime(h.ts)) + ' · ' + escapeHTML(c || '历史记录') + (qs ? ' · ' + escapeHTML(qs) : '') + escapeHTML(hidden) + '</summary><pre>' + escapeHTML(JSON.stringify(p, null, 2)).slice(0, 12000) + '</pre></details></div>';
+        });
+        if(!hist.length) html += '<div class="admin-parent-student-meta">暂无同步问卷历史。</div>';
+        html += '</div>';
+      });
+    }
+    html += '</div>';
+    host.innerHTML = html;
+    host.classList.add('show');
+    const close = $('adminParentDetailClose');
+    if(close) close.addEventListener('click', () => { host.classList.remove('show'); host.innerHTML = ''; });
+  }
+
+  async function showAdminParent(email){
+    const host = $('adminParentDetail');
+    if(!host) return;
+    host.innerHTML = '<div class="empty-state">正在读取家长详情…</div>';
+    host.classList.add('show');
+    try {
+      const res = await adminFetch('/api/admin/parents/' + encodeURIComponent(email));
+      if(!res) return;
+      const data = await res.json();
+      if(!res.ok || !data.success) throw new Error(data.error || '加载失败');
+      renderAdminParentDetail(data);
+    } catch(err){
+      host.innerHTML = '<div class="empty-state" style="color:#FF8FA0;">读取失败：' + escapeHTML(err.message || '加载失败') + '</div>';
+    }
+  }
+
   async function loadStudentAdminPolicy(){
     const status = $('adminPolicyStatus');
     const note = $('adminPolicyNote');
